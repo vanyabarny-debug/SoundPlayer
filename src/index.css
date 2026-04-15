@@ -1,0 +1,93 @@
+@import "tailwindcss";
+
+:root {
+  --accent-color: #8b5cf6;
+  --accent-soft: #8b5cf622;
+  --accent-soft-strong: #8b5cf633;
+}
+
+@layer utilities {
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  
+  @keyframes marquee {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-100%); }
+  }
+  .animate-marquee {
+    animation: marquee 10s linear infinite;
+    display: inline-block;
+    white-space: nowrap;
+  }
+}
+
+* {
+  scrollbar-width: none;
+}
+*::-webkit-scrollbar {
+  display: none;
+}
+
+body {
+  background: radial-gradient(circle at 20% 10%, #f5f3ff 0%, #eff6ff 35%, #f8fafc 100%);
+  color: #334155;
+}
+
+button,
+input,
+textarea,
+select,
+.rounded,
+.rounded-sm,
+.rounded-md,
+.rounded-lg,
+.rounded-xl,
+.rounded-2xl,
+.rounded-3xl {
+  border-radius: 0.75rem !important;
+}
+
+.dynamic-thumb::-webkit-slider-thumb {
+  background: var(--thumb-color, #8b5cf6) !important;
+}
+
+.dynamic-thumb::-moz-range-thumb {
+  background: var(--thumb-color, #8b5cf6) !important;
+  border: none;
+}
+
+.bg-violet-500 {
+  background-color: var(--accent-color) !important;
+}
+
+.text-violet-500,
+.text-violet-600 {
+  color: var(--accent-color) !important;
+}
+
+.border-violet-100 {
+  border-color: var(--accent-soft-strong) !important;
+}
+
+.bg-violet-100 {
+  background-color: var(--accent-soft) !important;
+}
+
+.shadow-violet-200,
+.shadow-violet-100 {
+  --tw-shadow-color: var(--accent-soft-strong) !important;
+}
+
+.hover\:bg-violet-50:hover {
+  background-color: var(--accent-soft) !important;
+}
+
+.hover\:text-violet-500:hover,
+.hover\:text-violet-600:hover {
+  color: var(--accent-color) !important;
+}
