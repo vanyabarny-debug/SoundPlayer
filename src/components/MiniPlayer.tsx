@@ -1,43 +1,183 @@
-import { Play, Pause, SkipForward, SkipBack, Loader2 } from 'lucide-react';
+import { Play, Pause, SkipForward, SkipBack, Loader2, Download } from 'lucide-react';
 import { usePlayerStore } from '../store/playerStore';
 import { useMockServer } from '../store/mockServer';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FullPlayer } from './FullPlayer';
 import { CachedImage } from './CachedImage';
 import { AnimatePresence } from 'motion/react';
 import { getAverageColor } from '../lib/colorExtractor';
-import { getImageFile } from '../lib/db';
+import { getImageFile, saveAudioFile, saveImageFile } from '../lib/db';
 import { useNavigate } from 'react-router-dom';
 import { resolveArtistId } from '../lib/artistRouting';
 import { toStringArray } from '../lib/safe';
+import { useAuthStore } from '../store/authStore';
 
 export function MiniPlayer() {
   const navigate = useNavigate();
-  const { currentTrackId, currentAlbumId, isPlaying, togglePlay, nextTrack, prevTrack, isLoading, currentTime, duration, seek } = usePlayerStore();
+  const {
+    currentTrackId,
+    currentAlbumId,
+    currentPreviewKey,
+    previewTitle,
+    previewArtist,
+    previewArtworkUrl,
+    isPlaying,
+    togglePlay,
+    nextTrack,
+    prevTrack,
+    playTrack,
+    isLoading,
+    currentTime,
+    duration,
+    seek,
+    repeatMode
+  } = usePlayerStore();
   const tracks = useMockServer(state => state.tracks);
   const albums = useMockServer(state => state.albums);
   const artists = useMockServer(state => state.artists);
+  const addTrack = useMockServer(state => state.addTrack);
+  const addArtist = useMockServer(state => state.addArtist);
+  const users = useMockServer(state => state.users);
+  const updateUser = useMockServer(state => state.updateUser);
+  const { currentUserId } = useAuthStore();
   const [isFullPlayerOpen, setIsFullPlayerOpen] = useState(false);
   const [miniDragTime, setMiniDragTime] = useState<number | null>(null);
   const [isMiniDragging, setIsMiniDragging] = useState(false);
   const [miniTrackColor, setMiniTrackColor] = useState('#8b5cf6');
+  const [isPreviewDownloading, setIsPreviewDownloading] = useState(false);
+  const repeatModeSnapshotRef = useRef<'off' | 'all' | 'one' | null>(null);
   const track = currentTrackId ? tracks[currentTrackId] : null;
   const album = currentAlbumId ? albums[currentAlbumId] : null;
   const isAlbumContext = Boolean(album);
+  const isPreviewContext = Boolean(!track && currentPreviewKey);
 
   const miniProgress = duration > 0 ? (currentTime / duration) * 100 : 0;
   const miniDisplayTime = isMiniDragging && miniDragTime !== null ? miniDragTime : currentTime;
   const miniDisplayProgress = duration > 0 ? (miniDisplayTime / duration) * 100 : 0;
   const miniThumbColor = miniTrackColor;
   const artistRefs = toStringArray(track?.artistIds);
-  const artistNames = artistRefs.length > 0 ? artistRefs.join(', ') : 'Unknown artist';
+  const artistNames = isPreviewContext
+    ? (previewArtist || 'Preview')
+    : (artistRefs.length > 0 ? artistRefs.join(', ') : 'Unknown artist');
+
+  useEffect(() => {
+    if (!isPreviewContext) {
+      if (repeatModeSnapshotRef.current) {
+        usePlayerStore.setState({ repeatMode: repeatModeSnapshotRef.current });
+        repeatModeSnapshotRef.current = null;
+      }
+      return;
+    }
+    if (!repeatModeSnapshotRef.current) {
+      repeatModeSnapshotRef.current = repeatMode;
+    }
+    if (repeatMode !== 'one') {
+      usePlayerStore.setState({ repeatMode: 'one' });
+    }
+  }, [isPreviewContext, repeatMode]);
+
+  const getAudioDurationFromBlob = async (audioBlob: Blob): Promise<number> => {
+    const objectUrl = URL.createObjectURL(audioBlob);
+    try {
+      return await new Promise<number>((resolve) => {
+        const audio = document.createElement('audio');
+        audio.preload = 'metadata';
+        audio.onloadedmetadata = () => resolve(Number.isFinite(audio.duration) ? audio.duration : 0);
+        audio.onerror = () => resolve(0);
+        audio.src = objectUrl;
+      });
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
+  };
+
+  const downloadPreviewTrack = async () => {
+    if (!isPreviewContext || !previewTitle || !previewArtist || isPreviewDownloading) return;
+    setIsPreviewDownloading(true);
+    try {
+      const normalizedArtist = previewArtist.trim();
+      const normalizedTitle = previewTitle
+        .replace(new RegExp(`^${normalizedArtist.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*[-–—:]\\s*`, 'i'), '')
+        .replace(/\s+/g, ' ')
+        .trim() || previewTitle.trim();
+      const query = `${previewArtist} - ${previewTitle}`;
+      const response = await fetch('/api/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query,
+          url: query,
+          title: previewTitle,
+          artist: previewArtist,
+          artworkUrl: previewArtworkUrl || '',
+        }),
+      });
+      if (!response.ok) throw new Error('Failed to download preview');
+      const blob = await response.blob();
+      const trackId = `mini-preview-${Date.now()}`;
+      await saveAudioFile(trackId, blob);
+
+      let coverId: string | undefined;
+      if (previewArtworkUrl) {
+        try {
+          const coverResponse = await fetch(previewArtworkUrl);
+          if (coverResponse.ok) {
+            coverId = `cover-${trackId}`;
+            await saveImageFile(coverId, await coverResponse.blob());
+          }
+        } catch {
+          // Keep download flow working without artwork.
+        }
+      }
+
+      const existingArtist = Object.values(artists).find(
+        (artist) => artist.name.trim().toLowerCase() === normalizedArtist.toLowerCase()
+      );
+      let artistRef = normalizedArtist;
+      if (existingArtist) {
+        artistRef = existingArtist.id;
+      } else {
+        artistRef = `artist-${Date.now()}-${normalizedArtist.toLowerCase().replace(/\s+/g, '-')}`;
+        addArtist({
+          id: artistRef,
+          name: normalizedArtist,
+          description: `${normalizedArtist} - imported from mini player preview.`,
+          ownerId: currentUserId || undefined,
+        });
+      }
+
+      addTrack({
+        id: trackId,
+        title: normalizedTitle,
+        artistIds: [normalizedArtist],
+        duration: await getAudioDurationFromBlob(blob),
+        isExplicit: false,
+        isSingle: true,
+        format: 'mp3',
+        coverUrl: coverId,
+        ownerId: currentUserId || 'system',
+      });
+
+      const user = currentUserId ? users[currentUserId] : null;
+      if (user) {
+        const nextFavorites = user.favoriteTrackIds.includes(trackId)
+          ? user.favoriteTrackIds
+          : [...user.favoriteTrackIds, trackId];
+        updateUser(user.id, { favoriteTrackIds: nextFavorites });
+      }
+      playTrack(trackId, [trackId], null);
+    } finally {
+      setIsPreviewDownloading(false);
+    }
+  };
 
   useEffect(() => {
     let objectUrl: string | undefined;
-    if (track?.coverUrl) {
-      const colorSourcePromise = track.coverUrl.startsWith('http')
-        ? getAverageColor(track.coverUrl)
-        : getImageFile(track.coverUrl).then(blob => {
+    const colorSource = track?.coverUrl || previewArtworkUrl;
+    if (colorSource) {
+      const colorSourcePromise = colorSource.startsWith('http')
+        ? getAverageColor(colorSource)
+        : getImageFile(colorSource).then(blob => {
             if (blob) {
               objectUrl = URL.createObjectURL(blob);
               return getAverageColor(objectUrl);
@@ -57,7 +197,7 @@ export function MiniPlayer() {
     return () => {
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [track?.coverUrl]);
+  }, [track?.coverUrl, previewArtworkUrl]);
 
   const commitMiniSeek = () => {
     if (miniDragTime !== null) {
@@ -76,7 +216,7 @@ export function MiniPlayer() {
   useEffect(() => {
   }, [currentTrackId, currentAlbumId, track?.id, currentTime, duration, isAlbumContext]);
 
-  if (!track) {
+  if (!track && !isPreviewContext) {
     return null;
   }
 
@@ -90,12 +230,13 @@ export function MiniPlayer() {
             navigate(`/album/${album.id}`);
             return;
           }
+          if (isPreviewContext) return;
           setIsFullPlayerOpen(true);
         }}
       >
         <div className="w-10 h-10 bg-violet-100 rounded-[2px] overflow-hidden flex-shrink-0">
-          {(album?.coverUrl || track.coverUrl) ? (
-            <CachedImage src={album?.coverUrl || track.coverUrl || ''} alt={album?.title || track.title} className="w-full h-full object-cover" />
+          {(album?.coverUrl || track?.coverUrl || previewArtworkUrl) ? (
+            <CachedImage src={album?.coverUrl || track?.coverUrl || previewArtworkUrl || ''} alt={album?.title || track?.title || previewTitle || 'Preview'} className="w-full h-full object-cover" />
           ) : (
             <div className="w-full h-full flex items-center justify-center text-slate-400 text-xs">No Cover</div>
           )}
@@ -103,14 +244,16 @@ export function MiniPlayer() {
         
         <div className="flex-1 min-w-0">
           <div className="text-sm font-medium text-slate-700 truncate">
-            {isAlbumContext ? `${album?.title || ''} · ${track.title}` : track.title}
+            {isPreviewContext
+              ? (previewTitle || 'Preview')
+              : (isAlbumContext ? `${album?.title || ''} · ${track?.title || ''}` : track?.title)}
           </div>
           <div className="text-xs text-slate-400 truncate">
-            {artistRefs.length > 0 ? (
+            {!isPreviewContext && artistRefs.length > 0 ? (
               <>
                 {artistRefs.map((artistRef, index) => {
                   const artistId = resolveArtistId(artistRef, artists);
-                  const key = `${track.id}-mini-artist-${artistRef}-${index}`;
+                  const key = `${track?.id || 'preview'}-mini-artist-${artistRef}-${index}`;
                   if (!artistId) {
                     return <span key={key}>{index > 0 ? `, ${artistRef}` : artistRef}</span>;
                   }
@@ -131,13 +274,33 @@ export function MiniPlayer() {
                 })}
               </>
             ) : (
-              artistNames
+              isPreviewContext ? (
+                <button
+                  className="hover:text-violet-500 transition-colors underline-offset-2 hover:underline"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate(`/artist/itunes-${encodeURIComponent(previewArtist || '')}?source=itunes&name=${encodeURIComponent(previewArtist || '')}`);
+                  }}
+                >
+                  {artistNames}
+                </button>
+              ) : artistNames
             )}
           </div>
         </div>
 
         <div className="flex items-center gap-2 pr-2" onClick={e => e.stopPropagation()}>
-          {isAlbumContext && (
+          {isPreviewContext && (
+            <button
+              onClick={() => void downloadPreviewTrack()}
+              className="p-2 text-slate-600 hover:text-violet-500"
+              disabled={isPreviewDownloading}
+              aria-label="Download preview"
+            >
+              {isPreviewDownloading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
+            </button>
+          )}
+          {isAlbumContext && !isPreviewContext && (
             <button onClick={prevTrack} className="p-2 text-slate-600 hover:text-violet-500">
               <SkipBack className="w-5 h-5 fill-current" />
             </button>
@@ -149,38 +312,40 @@ export function MiniPlayer() {
             <SkipForward className="w-5 h-5 fill-current" />
           </button>
         </div>
-        <input
-          type="range"
-          min={0}
-          max={duration || 100}
-          value={miniDisplayTime}
-          onPointerDown={(e) => {
-            e.stopPropagation();
-            setIsMiniDragging(true);
-          }}
-          onPointerUp={(e) => {
-            e.stopPropagation();
-            commitMiniSeek();
-          }}
-          onPointerCancel={() => commitMiniSeek()}
-          onBlur={() => commitMiniSeek()}
-          onClick={(e) => e.stopPropagation()}
-          onChange={(e) => {
-            const next = Number(e.target.value);
-            setMiniDragTime(next);
-          }}
-          className="absolute left-0 right-0 bottom-0 h-1.5 bg-slate-200 appearance-none cursor-pointer dynamic-thumb [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full"
-          style={{
-            background: `linear-gradient(to right, ${miniTrackColor} ${miniDisplayProgress}%, rgb(203 213 225) ${miniDisplayProgress}%)`,
-            ['--thumb-color' as string]: miniThumbColor,
-            accentColor: miniThumbColor
-          }}
-        />
+        {!isPreviewContext && (
+          <input
+            type="range"
+            min={0}
+            max={duration || 100}
+            value={miniDisplayTime}
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              setIsMiniDragging(true);
+            }}
+            onPointerUp={(e) => {
+              e.stopPropagation();
+              commitMiniSeek();
+            }}
+            onPointerCancel={() => commitMiniSeek()}
+            onBlur={() => commitMiniSeek()}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => {
+              const next = Number(e.target.value);
+              setMiniDragTime(next);
+            }}
+            className="absolute left-0 right-0 bottom-0 h-1.5 bg-slate-200 appearance-none cursor-pointer dynamic-thumb [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full"
+            style={{
+              background: `linear-gradient(to right, ${miniTrackColor} ${miniDisplayProgress}%, rgb(203 213 225) ${miniDisplayProgress}%)`,
+              ['--thumb-color' as string]: miniThumbColor,
+              accentColor: miniThumbColor
+            }}
+          />
+        )}
       </div>
 
       <AnimatePresence mode="wait">
-        {isFullPlayerOpen && (
-          <FullPlayer key="fullplayer" onClose={() => setIsFullPlayerOpen(false)} track={track} />
+        {isFullPlayerOpen && track && (
+          <FullPlayer onClose={() => setIsFullPlayerOpen(false)} track={track} />
         )}
       </AnimatePresence>
     </>

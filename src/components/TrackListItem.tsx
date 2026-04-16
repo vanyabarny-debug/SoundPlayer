@@ -67,12 +67,13 @@ interface TrackListItemProps {
   onArtistClick?: (artistRef: string) => void;
   onEdit: () => void;
   onDelete?: () => void;
+  onOpenRecommendations?: () => void;
   showMenu?: boolean;
 }
 
 export function TrackListItem({ 
   track, user, isPlaying, isActive, leadingContent, searchQuery, 
-  onPlay, onToggleFavorite, onAddToPlaylist, onAddToAlbum, onArtistClick, onEdit, onDelete, showMenu = true
+  onPlay, onToggleFavorite, onAddToPlaylist, onAddToAlbum, onArtistClick, onEdit, onDelete, onOpenRecommendations, showMenu = true
 }: TrackListItemProps) {
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
   const artistRefs = toStringArray(track.artistIds);
@@ -139,8 +140,8 @@ export function TrackListItem({
         )}
       </div>
       <div className="flex gap-1 opacity-100 transition-opacity mr-2">
-        {track.isExplicit && <span className="px-1.5 py-0.5 bg-violet-100 text-violet-600 text-[9px] font-bold rounded-full">E</span>}
-        <span className="px-1.5 py-0.5 bg-violet-100 text-violet-600 text-[9px] font-bold rounded-full uppercase">{track.format}</span>
+        {track.isExplicit && <span className="px-1.5 py-0.5 text-violet-600 text-[9px] font-bold rounded-full">E</span>}
+        <span className="px-1.5 py-0.5 text-violet-600 text-[9px] font-bold rounded-full uppercase">{track.format}</span>
       </div>
       {showMenu && (
         <button 
@@ -181,6 +182,14 @@ export function TrackListItem({
           >
             <Edit2 className="w-4 h-4" /> Редактировать
           </button>
+          {onOpenRecommendations && (
+            <button
+              className="w-full text-left px-4 py-3 text-sm hover:bg-violet-50 flex items-center gap-2"
+              onClick={(e) => { e.stopPropagation(); onOpenRecommendations(); setIsMenuOpen(false); }}
+            >
+              <PlusCircle className="w-4 h-4" /> Похожие в Radooga
+            </button>
+          )}
           {onDelete && (
             <button
               className="w-full text-left px-4 py-3 text-sm hover:bg-rose-50 text-rose-600 flex items-center gap-2"

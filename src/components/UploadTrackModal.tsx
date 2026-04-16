@@ -265,10 +265,15 @@ export function UploadTrackModal({ onClose }: { onClose: () => void }) {
       const existing = existingArtists.find(a => a.name === name);
       if (!existing) {
         const artistId = uuidv4();
+        const artistBannerId = coverFile ? `artist-banner-${artistId}` : undefined;
+        if (coverFile && artistBannerId) {
+          void saveImageFile(artistBannerId, coverFile);
+        }
         useMockServer.getState().addArtist({
           id: artistId,
           name,
           description: '',
+          bannerUrl: artistBannerId,
         });
         if (!newFavoriteArtistIds.includes(artistId)) {
           newFavoriteArtistIds.push(artistId);
@@ -297,7 +302,7 @@ export function UploadTrackModal({ onClose }: { onClose: () => void }) {
         <div className="overflow-y-auto p-4 flex-1">
           <form id="upload-form" onSubmit={handleSubmit} className="space-y-4">
             
-            <div 
+            <div
               className="border-2 border-dashed border-zinc-700 rounded-2xl p-8 flex flex-col items-center justify-center cursor-pointer hover:border-zinc-500 transition-colors"
               onClick={() => fileInputRef.current?.click()}
             >
@@ -317,14 +322,14 @@ export function UploadTrackModal({ onClose }: { onClose: () => void }) {
               ) : (
                 <>
                   <Upload className="w-12 h-12 text-zinc-500 mb-2" />
-                  <span className="text-sm font-medium text-zinc-400">Нажмите чтобы выбрать файл</span>
+                  <span className="text-sm font-medium text-zinc-400">Выбрать аудиофайл</span>
                   <span className="text-xs text-zinc-600 mt-1">MP3, WAV, FLAC, M4A</span>
                 </>
               )}
             </div>
 
             {file && (
-              <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
+              <div className="space-y-4">
                 <div>
                   <label className="block text-xs font-medium text-zinc-400 mb-1">Название трека</label>
                   <input
@@ -400,16 +405,6 @@ export function UploadTrackModal({ onClose }: { onClose: () => void }) {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-zinc-400 mb-1">Продюсер</label>
-                  <input
-                    type="text"
-                    value={producer}
-                    onChange={e => setProducer(e.target.value)}
-                    className="w-full bg-zinc-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-white/20"
-                  />
-                </div>
-
-                <div>
                   <label className="block text-xs font-medium text-zinc-400 mb-1">Фиты (через запятую)</label>
                   <input
                     type="text"
@@ -458,14 +453,23 @@ export function UploadTrackModal({ onClose }: { onClose: () => void }) {
         </div>
         
         <div className="p-4 border-t border-zinc-800">
-          <button
-            type="submit"
-            form="upload-form"
-            disabled={!file}
-            className="w-full bg-white text-black font-bold py-3 rounded-xl hover:bg-zinc-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Загрузить и сохранить
-          </button>
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 px-4 py-2 bg-zinc-800 text-white rounded-lg hover:bg-zinc-700 transition-colors font-medium"
+            >
+              Отмена
+            </button>
+            <button
+              type="submit"
+              form="upload-form"
+              disabled={!file}
+              className="flex-1 px-4 py-2 bg-white text-black rounded-lg hover:bg-zinc-200 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Загрузить
+            </button>
+          </div>
         </div>
       </div>
       {creatingArtistName && currentUserId && (

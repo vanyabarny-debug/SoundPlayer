@@ -4,15 +4,28 @@ import { getAudioFile } from '../lib/db';
 
 export function AudioPlayer() {
   const audioRef = useRef<HTMLAudioElement>(null);
-  const { currentTrackId, isPlaying, volume, isMuted, repeatMode, setTime, setDuration, nextTrack, setLoading, seekRequest, clearSeekRequest } = usePlayerStore();
+  const { currentTrackId, previewUrl, isPlaying, volume, isMuted, repeatMode, setTime, setDuration, nextTrack, setLoading, seekRequest, clearSeekRequest, updateAudioMetrics } = usePlayerStore();
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const analyserContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const lastMetricsTsRef = useRef(0);
 
   useEffect(() => {
-    if (!currentTrackId) return;
-
     let objectUrl: string | null = null;
 
     const loadAudio = async () => {
+      if (previewUrl) {
+        setLoading(true);
+        setAudioUrl(previewUrl);
+        return;
+      }
+      if (!currentTrackId) {
+        setAudioUrl(null);
+        setLoading(false);
+        return;
+      }
       try {
         setLoading(true);
         const file = await getAudioFile(currentTrackId);
@@ -48,7 +61,90 @@ export function AudioPlayer() {
         URL.revokeObjectURL(objectUrl);
       }
     };
-  }, [currentTrackId]);
+  }, [currentTrackId, previewUrl]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || !audioUrl) return;
+    let cancelled = false;
+
+    const setupAnalyser = () => {
+      try {
+        if (!analyserContextRef.current) {
+          analyserContextRef.current = new AudioContext();
+        }
+        const context = analyserContextRef.current;
+        if (context.state === 'suspended') {
+          void context.resume().catch(() => undefined);
+        }
+        if (!sourceNodeRef.current) {
+          const stream =
+            audio.captureStream?.() ||
+            (audio as HTMLAudioElement & { mozCaptureStream?: () => MediaStream }).mozCaptureStream?.();
+          if (!stream) return;
+          sourceNodeRef.current = context.createMediaStreamSource(stream);
+        }
+        const analyser = context.createAnalyser();
+        analyser.fftSize = 256;
+        analyser.smoothingTimeConstant = 0.78;
+        sourceNodeRef.current.connect(analyser);
+        analyserRef.current = analyser;
+
+        const spectrum = new Uint8Array(analyser.frequencyBinCount);
+        const tick = () => {
+          if (cancelled || !analyserRef.current) return;
+          const now = performance.now();
+          analyserRef.current.getByteFrequencyData(spectrum);
+
+          if (now - lastMetricsTsRef.current >= 33) {
+            lastMetricsTsRef.current = now;
+            const bucketSize = Math.floor(spectrum.length / 8);
+            const bands = new Array<number>(8).fill(0).map((_, bandIndex) => {
+              const start = bandIndex * bucketSize;
+              const end = bandIndex === 7 ? spectrum.length : start + bucketSize;
+              let sum = 0;
+              for (let i = start; i < end; i += 1) sum += spectrum[i];
+              return sum / Math.max(end - start, 1) / 255;
+            });
+            const energy = bands.reduce((sum, value) => sum + value, 0) / bands.length;
+            updateAudioMetrics({ energy, bands });
+          }
+
+          rafRef.current = window.requestAnimationFrame(tick);
+        };
+        rafRef.current = window.requestAnimationFrame(tick);
+      } catch {
+        // Keep audio playback running even if analyser fails.
+      }
+    };
+
+    setupAnalyser();
+
+    return () => {
+      cancelled = true;
+      if (rafRef.current) {
+        window.cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+      if (analyserRef.current) {
+        try {
+          analyserRef.current.disconnect();
+        } catch {
+          // ignore
+        }
+        analyserRef.current = null;
+      }
+      if (sourceNodeRef.current) {
+        try {
+          sourceNodeRef.current.disconnect();
+        } catch {
+          // ignore
+        }
+        sourceNodeRef.current = null;
+      }
+      updateAudioMetrics({ energy: 0, bands: [0, 0, 0, 0, 0, 0, 0, 0] });
+    };
+  }, [audioUrl, updateAudioMetrics]);
 
   useEffect(() => {
     if (audioRef.current) {
@@ -96,12 +192,22 @@ export function AudioPlayer() {
     }
   };
 
+  const handleCanPlay = () => {
+    setLoading(false);
+  };
+
+  const handleError = () => {
+    setLoading(false);
+  };
+
   return (
     <audio
       ref={audioRef}
       src={audioUrl || undefined}
       onTimeUpdate={handleTimeUpdate}
       onLoadedMetadata={handleLoadedMetadata}
+      onCanPlay={handleCanPlay}
+      onError={handleError}
       onEnded={handleEnded}
     />
   );

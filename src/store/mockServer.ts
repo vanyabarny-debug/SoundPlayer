@@ -32,6 +32,7 @@ export interface Playlist {
   title: string;
   ownerId: string;
   coverUrl?: string;
+  description?: string;
   status?: string;
   trackIds: string[];
   type: 'playlist';
@@ -43,6 +44,8 @@ export interface Album {
   ownerId: string;
   coverUrl?: string;
   trackIds: string[];
+  sourceTrackCount?: number;
+  itunesCollectionId?: string;
   type: 'album';
   artistIds: string[];
   description?: string;
@@ -59,6 +62,7 @@ export interface User {
   favoritePlaylistIds?: string[];
   favoriteAlbumIds?: string[];
   favoriteArtistIds?: string[];
+  dislikedArtistNames?: string[];
 }
 
 interface MockServerState {
@@ -75,6 +79,7 @@ interface MockServerState {
   deleteTrack: (id: string) => void;
   addArtist: (artist: Artist) => void;
   updateArtist: (id: string, data: Partial<Artist>) => void;
+  deleteArtist: (id: string) => void;
   addPlaylist: (playlist: Playlist) => void;
   updatePlaylist: (id: string, data: Partial<Playlist>) => void;
   addAlbum: (album: Album) => void;
@@ -133,6 +138,53 @@ export const useMockServer = create<MockServerState>()(
       }),
       addArtist: (artist) => set((state) => ({ artists: { ...state.artists, [artist.id]: artist } })),
       updateArtist: (id, data) => set((state) => ({ artists: { ...state.artists, [id]: { ...state.artists[id], ...data } } })),
+      deleteArtist: (id) => set((state) => {
+        const { [id]: removedArtist, ...restArtists } = state.artists;
+        const removedName = removedArtist?.name?.trim();
+
+        const updatedUsers = Object.fromEntries(
+          Object.entries(state.users).map(([userId, user]) => [
+            userId,
+            {
+              ...user,
+              favoriteArtistIds: (user.favoriteArtistIds || []).filter((artistId) => artistId !== id),
+            },
+          ])
+        );
+
+        const updatedTracks = Object.fromEntries(
+          Object.entries(state.tracks).map(([trackId, track]) => [
+            trackId,
+            {
+              ...track,
+              artistIds: (track.artistIds || []).filter((artistRef) => {
+                const normalized = String(artistRef).trim().toLowerCase();
+                if (!normalized) return false;
+                if (normalized === id.toLowerCase()) return false;
+                if (removedName && normalized === removedName.toLowerCase()) return false;
+                return true;
+              }),
+            },
+          ])
+        );
+
+        const updatedAlbums = Object.fromEntries(
+          Object.entries(state.albums).map(([albumId, album]) => [
+            albumId,
+            {
+              ...album,
+              artistIds: (album.artistIds || []).filter((artistId) => artistId !== id),
+            },
+          ])
+        );
+
+        return {
+          artists: restArtists,
+          users: updatedUsers,
+          tracks: updatedTracks,
+          albums: updatedAlbums,
+        };
+      }),
       addPlaylist: (playlist) => set((state) => ({ playlists: { ...state.playlists, [playlist.id]: playlist } })),
       updatePlaylist: (id, data) => set((state) => ({ playlists: { ...state.playlists, [id]: { ...state.playlists[id], ...data } } })),
       addAlbum: (album) => set((state) => ({ albums: { ...state.albums, [album.id]: album } })),
@@ -140,6 +192,51 @@ export const useMockServer = create<MockServerState>()(
     }),
     {
       name: 'mock-server-storage',
+      version: 3,
+      migrate: (persistedState: unknown, version: number) => {
+        if (!persistedState || typeof persistedState !== 'object') {
+          return persistedState as MockServerState;
+        }
+        const state = persistedState as Partial<MockServerState>;
+        const albums = state.albums || {};
+        const tracks = state.tracks || {};
+        const users = state.users || {};
+
+        const albumIdMap: Record<string, string> = {};
+        const migratedAlbums: Record<string, Album> = {};
+        for (const [albumId, album] of Object.entries(albums)) {
+          if (albumId.startsWith('itunes-album-')) {
+            const collectionId = albumId.replace('itunes-album-', '').trim();
+            const newId = collectionId ? `itunes-${collectionId}` : albumId;
+            albumIdMap[albumId] = newId;
+            migratedAlbums[newId] = { ...album, id: newId, itunesCollectionId: collectionId || album.itunesCollectionId };
+          } else if (albumId.startsWith('itunes-')) {
+            const collectionId = albumId.replace('itunes-', '').trim();
+            migratedAlbums[albumId] = { ...album, itunesCollectionId: album.itunesCollectionId || collectionId };
+          } else {
+            migratedAlbums[albumId] = album;
+          }
+        }
+
+        const migratedTracks: Record<string, TrackMetadata> = {};
+        for (const [trackId, track] of Object.entries(tracks)) {
+          const nextAlbumId = track.albumId && albumIdMap[track.albumId] ? albumIdMap[track.albumId] : track.albumId;
+          migratedTracks[trackId] = nextAlbumId === track.albumId ? track : { ...track, albumId: nextAlbumId };
+        }
+
+        const migratedUsers: Record<string, User> = {};
+        for (const [userId, user] of Object.entries(users)) {
+          const favoriteAlbumIds = (user.favoriteAlbumIds || []).map((albumId) => albumIdMap[albumId] || albumId);
+          migratedUsers[userId] = { ...user, favoriteAlbumIds };
+        }
+
+        return {
+          ...state,
+          albums: migratedAlbums,
+          tracks: migratedTracks,
+          users: migratedUsers,
+        } as MockServerState;
+      },
     }
   )
 );

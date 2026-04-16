@@ -37,3 +37,8 @@ export async function getImageFile(id: string): Promise<Blob | undefined> {
   const db = await dbPromise;
   return db.get('audioFiles', id);
 }
+
+export async function deleteImageFile(id: string) {
+  const db = await dbPromise;
+  await db.delete('audioFiles', id);
+}

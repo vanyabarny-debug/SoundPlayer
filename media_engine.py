@@ -8,6 +8,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any
 from urllib.error import URLError
+from urllib.parse import quote_plus
 from urllib.request import Request, urlopen
 
 from mutagen.id3 import APIC, TALB, TIT2, TPE1, USLT, ID3, ID3NoHeaderError
@@ -93,6 +94,50 @@ def _sanitize_lyrics_text(lyrics: str | None) -> str:
     return text.strip()
 
 
+def _fetch_itunes_metadata(query: str) -> dict[str, str]:
+    if not query.strip():
+        return {}
+
+    endpoint = f"https://itunes.apple.com/search?entity=song&limit=1&term={quote_plus(query)}"
+    try:
+        request = Request(
+            endpoint,
+            headers={
+                "User-Agent": "Mozilla/5.0",
+                "Accept": "application/json",
+            },
+        )
+        with urlopen(request, timeout=12) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except Exception:
+        return {}
+
+    if not isinstance(payload, dict):
+        return {}
+    results = payload.get("results")
+    if not isinstance(results, list) or not results:
+        return {}
+    top = results[0]
+    if not isinstance(top, dict):
+        return {}
+
+    title = str(top.get("trackName") or "").strip()
+    artist = str(top.get("artistName") or "").strip()
+    album = str(top.get("collectionName") or "").strip()
+    artwork_600 = str(top.get("artworkUrl600") or "").strip()
+    artwork_100 = str(top.get("artworkUrl100") or "").strip()
+    artwork = artwork_600 or artwork_100
+    if artwork and "100x100" in artwork:
+        artwork = artwork.replace("100x100bb", "1000x1000bb").replace("100x100", "1000x1000")
+
+    return {
+        "title": title,
+        "artist": artist,
+        "album": album,
+        "artworkUrl": artwork,
+    }
+
+
 def _apply_tags(
     mp3_path: Path,
     title: str,
@@ -135,10 +180,11 @@ def _apply_tags(
 
 def process_media(payload: dict[str, Any] | str) -> dict[str, object]:
     normalized_payload = payload if isinstance(payload, dict) else {"query": str(payload)}
-    query = str(normalized_payload.get("query") or "").strip()
-    if not query:
-        raise RuntimeError("query is required")
-
+    query_value = normalized_payload.get("query")
+    if isinstance(query_value, (dict, list, tuple, set)):
+        query = json.dumps(query_value, ensure_ascii=False).strip()
+    else:
+        query = str(query_value or "").strip()
     provided_title = str(normalized_payload.get("title") or "").strip()
     provided_artist = str(normalized_payload.get("artist") or "").strip()
     provided_album = str(normalized_payload.get("album") or "").strip()
@@ -149,11 +195,19 @@ def process_media(payload: dict[str, Any] | str) -> dict[str, object]:
     storage_dir.mkdir(parents=True, exist_ok=True)
 
     output_template = str(storage_dir / "%(title)s [%(id)s].%(ext)s")
+    if not query:
+        query = " - ".join(part for part in [provided_artist, provided_title] if part).strip()
+    if not query:
+        raise RuntimeError("query is required")
+
+    normalized_query = query
     ydl_opts: dict[str, object] = {
         "format": "bestaudio/best",
         "noplaylist": True,
         "outtmpl": output_template,
         "default_search": "auto",
+        "extractaudio": True,
+        "audioformat": "mp3",
         "quiet": True,
         "no_warnings": True,
         "postprocessors": [
@@ -166,7 +220,7 @@ def process_media(payload: dict[str, Any] | str) -> dict[str, object]:
     }
 
     with YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(query, download=True)
+        info = ydl.extract_info(normalized_query, download=True)
         if not isinstance(info, dict):
             raise RuntimeError("yt-dlp returned invalid metadata")
         if isinstance(info.get("entries"), list) and info["entries"]:
@@ -184,10 +238,24 @@ def process_media(payload: dict[str, Any] | str) -> dict[str, object]:
             raise RuntimeError("Downloaded mp3 file was not found in storage")
         mp3_path = alt_candidates[0]
 
-    resolved_title = provided_title or str(info.get("track") or info.get("title") or mp3_path.stem)
-    resolved_artist = provided_artist or str(info.get("artist") or info.get("uploader") or "").strip()
-    resolved_album = provided_album or str(info.get("album") or "").strip()
-    resolved_lyrics = _sanitize_lyrics_text(_fetch_lyrics(title=resolved_title, artist=resolved_artist, query=query))
+    itunes_meta = _fetch_itunes_metadata(query=normalized_query)
+    resolved_title = (
+        itunes_meta.get("title")
+        or provided_title
+        or str(info.get("track") or info.get("title") or mp3_path.stem)
+    )
+    resolved_artist = (
+        itunes_meta.get("artist")
+        or provided_artist
+        or str(info.get("artist") or info.get("uploader") or "").strip()
+    )
+    resolved_album = (
+        itunes_meta.get("album")
+        or provided_album
+        or str(info.get("album") or "").strip()
+    )
+    resolved_artwork_url = itunes_meta.get("artworkUrl") or artwork_url
+    resolved_lyrics = _sanitize_lyrics_text(_fetch_lyrics(title=resolved_title, artist=resolved_artist, query=normalized_query))
 
     pretty_base_name = _sanitize_filename(
         " - ".join(part for part in [resolved_artist, resolved_title] if part.strip()) or resolved_title
@@ -211,7 +279,7 @@ def process_media(payload: dict[str, Any] | str) -> dict[str, object]:
         title=resolved_title,
         artist=resolved_artist,
         album=resolved_album,
-        artwork_url=artwork_url,
+        artwork_url=resolved_artwork_url,
         lyrics=resolved_lyrics,
     )
 
@@ -233,6 +301,8 @@ if __name__ == "__main__":
 
     try:
         raw_payload = sys.argv[1]
+        if not isinstance(raw_payload, str):
+            raw_payload = str(raw_payload)
         payload: dict[str, Any] | str
         try:
             parsed = json.loads(raw_payload)

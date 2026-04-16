@@ -69,7 +69,15 @@ export function FullPlayer({ onClose, track }: { onClose: () => void, track: Tra
   
   const user = currentUserId ? users[currentUserId] : null;
   const userFavoriteTrackIds = user?.favoriteTrackIds ?? [];
-  const isFavorite = userFavoriteTrackIds.includes(track.id);
+  const normalizeValue = (value: string) => value.trim().toLowerCase();
+  const isTrackEquivalent = (source: TrackMetadata, candidate: TrackMetadata) =>
+    normalizeValue(source.title) === normalizeValue(candidate.title)
+    && normalizeValue(source.artistIds?.[0] || '') === normalizeValue(candidate.artistIds?.[0] || '');
+  const favoriteTracks = userFavoriteTrackIds
+    .map((trackId) => useMockServer.getState().tracks[trackId])
+    .filter((candidate): candidate is TrackMetadata => Boolean(candidate));
+  const isFavorite = userFavoriteTrackIds.includes(track.id)
+    || favoriteTracks.some((candidate) => isTrackEquivalent(track, candidate));
   const linkedAlbum = track.albumId
     ? albums[track.albumId]
     : Object.values(albums).find((album) => album.trackIds.includes(track.id));
@@ -79,9 +87,13 @@ export function FullPlayer({ onClose, track }: { onClose: () => void, track: Tra
   const toggleFavorite = () => {
     if (!user) return;
     const favorites = user.favoriteTrackIds ?? [];
+    const allTracks = Object.values(useMockServer.getState().tracks);
+    const equivalentTrackIds = allTracks
+      .filter((candidate) => isTrackEquivalent(track, candidate))
+      .map((candidate) => candidate.id);
     const newFavorites = isFavorite 
-      ? favorites.filter(id => id !== track.id)
-      : [...favorites, track.id];
+      ? favorites.filter((id) => !equivalentTrackIds.includes(id))
+      : Array.from(new Set([...favorites, track.id, ...equivalentTrackIds]));
     updateUser(user.id, { favoriteTrackIds: newFavorites });
   };
 

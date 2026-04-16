@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMockServer } from '../store/mockServer';
+import { useAuthStore } from '../store/authStore';
 import { X, Plus } from 'lucide-react';
 
 interface AddToPlaylistModalProps {
@@ -9,10 +10,12 @@ interface AddToPlaylistModalProps {
 }
 
 export function AddToPlaylistModal({ trackId, onClose }: AddToPlaylistModalProps) {
-  const { playlists, updatePlaylist } = useMockServer();
+  const { playlists, updatePlaylist, addPlaylist } = useMockServer();
+  const currentUserId = useAuthStore((state) => state.currentUserId);
   const [search, setSearch] = useState('');
+  const [newPlaylistTitle, setNewPlaylistTitle] = useState('');
 
-  const myPlaylists = Object.values(playlists).filter(p => p.ownerId === 'me');
+  const myPlaylists = Object.values(playlists).filter((p) => p.ownerId === currentUserId);
   
   const filteredPlaylists = myPlaylists.filter(p => 
     p.title.toLowerCase().includes(search.toLowerCase())
@@ -23,6 +26,18 @@ export function AddToPlaylistModal({ trackId, onClose }: AddToPlaylistModalProps
     if (!playlist.trackIds.includes(trackId)) {
       updatePlaylist(playlistId, { trackIds: [...playlist.trackIds, trackId] });
     }
+    onClose();
+  };
+  const handleCreateAndAdd = () => {
+    if (!currentUserId || !newPlaylistTitle.trim()) return;
+    const playlistId = `pl-${Date.now()}`;
+    addPlaylist({
+      id: playlistId,
+      title: newPlaylistTitle.trim(),
+      ownerId: currentUserId,
+      trackIds: [trackId],
+      type: 'playlist',
+    });
     onClose();
   };
 
@@ -44,6 +59,23 @@ export function AddToPlaylistModal({ trackId, onClose }: AddToPlaylistModalProps
             onChange={e => setSearch(e.target.value)}
             className="w-full bg-white text-slate-700 px-4 py-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-200"
           />
+          <div className="mt-3 flex gap-2">
+            <input
+              type="text"
+              placeholder="Новый плейлист..."
+              value={newPlaylistTitle}
+              onChange={(e) => setNewPlaylistTitle(e.target.value)}
+              className="flex-1 bg-white text-slate-700 px-4 py-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-200"
+            />
+            <button
+              type="button"
+              onClick={handleCreateAndAdd}
+              disabled={!newPlaylistTitle.trim()}
+              className="px-3 py-2 rounded-xl bg-violet-600 text-white disabled:opacity-50"
+            >
+              Создать
+            </button>
+          </div>
         </div>
 
         <div className="overflow-y-auto p-2">
