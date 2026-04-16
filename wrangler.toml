@@ -1,0 +1,6 @@
+name = "rainboow"
+compatibility_date = "2026-04-16"
+
+[assets]
+directory = "./dist"
+not_found_handling = "single-page-application"
