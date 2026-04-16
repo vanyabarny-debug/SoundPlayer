@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: soundplayer-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile.api
+    plan: starter
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 8787
+      - key: FRONTEND_ORIGIN
+        sync: false
+      - key: GENIUS_ACCESS_TOKEN
+        sync: false
+      - key: PEXELS_API_KEY
+        sync: false

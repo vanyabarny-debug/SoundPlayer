@@ -28,6 +28,7 @@ import {
 import { popNavigationEntry, pushNavigationEntry } from '../lib/navigationHistory';
 import { isPlaceholderArtistDescription, resolveArtistDescriptionRu } from '../lib/wikiDescriptions';
 import { ensureArtistBannerFromTrackCover } from '../lib/artistBannerCache';
+import { apiUrl } from '../lib/apiUrl';
 
 export function ArtistPage() {
   const { id } = useParams<{ id: string }>();
@@ -859,7 +860,7 @@ export function ArtistPage() {
     });
   };
   const importOnlineTrackToLibrary = async (track: OnlineTrackItemData): Promise<string> => {
-      const response = await fetch('/api/download', {
+      const response = await fetch(apiUrl('/api/download'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

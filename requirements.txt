@@ -1,0 +1,5 @@
+mutagen
+yt-dlp
+Pillow
+syncedlyrics
+lyricsgenius

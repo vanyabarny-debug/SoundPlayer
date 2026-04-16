@@ -2,6 +2,7 @@ import { RadoogaCandidate } from './radoogaRecommendations';
 import {
   hashStringSeed,
 } from './radoogaGenreAesthetics';
+import { apiUrl } from './apiUrl';
 
 export type RadoogaNewsItem = {
   title: string;
@@ -280,7 +281,7 @@ export const sanitizeLyricsStrict = (rawLyrics: string): string | null => {
 export const resolveLyricsSnippet = async (candidate: RadoogaCandidate): Promise<string | null> => {
   const key = `lyrics:${candidate.id}`;
   return withCache(key, 1000 * 60 * 30, async () => {
-    const response = await fetch('/api/lyrics/lookup', {
+    const response = await fetch(apiUrl('/api/lyrics/lookup'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

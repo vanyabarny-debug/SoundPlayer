@@ -14,6 +14,7 @@ import { getAverageColor } from '../lib/colorExtractor';
 import { popNavigationEntry, pushNavigationEntry } from '../lib/navigationHistory';
 import { resolveAlbumDescriptionRu } from '../lib/wikiDescriptions';
 import { ensureArtistBannerFromTrackCover } from '../lib/artistBannerCache';
+import { apiUrl } from '../lib/apiUrl';
 
 export function AlbumPage() {
   const { id } = useParams<{ id: string }>();
@@ -539,7 +540,7 @@ export function AlbumPage() {
     });
   };
   const persistItunesTrack = async (track: OnlineTrackItemData): Promise<string> => {
-    const response = await fetch('/api/download', {
+    const response = await fetch(apiUrl('/api/download'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

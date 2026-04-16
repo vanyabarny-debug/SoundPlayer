@@ -33,6 +33,7 @@ import {
 import { pushNavigationEntry } from '../lib/navigationHistory';
 import { resolveArtistDescriptionRu } from '../lib/wikiDescriptions';
 import { ensureArtistBannerFromTrackCover } from '../lib/artistBannerCache';
+import { apiUrl } from '../lib/apiUrl';
 
 const Highlight = ({ text, highlight }: { text: string, highlight: string }) => {
   if (!highlight.trim() || !text) return <>{text}</>;
@@ -1040,7 +1041,7 @@ export function BrowsePage() {
 
       lyricsLookupInFlightRef.current.add(result.id);
       try {
-        const response = await fetch('/api/lyrics/lookup', {
+        const response = await fetch(apiUrl('/api/lyrics/lookup'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1200,7 +1201,7 @@ export function BrowsePage() {
     setDownloadLoadingId(result.id);
     setDownloadError(null);
     try {
-      const response = await fetch('/api/download', {
+      const response = await fetch(apiUrl('/api/download'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

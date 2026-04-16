@@ -13,6 +13,7 @@ import { toStringArray } from '../lib/safe';
 import { useAuthStore } from '../store/authStore';
 import { ensureArtistBannerFromTrackCover } from '../lib/artistBannerCache';
 import { resolveArtistDescriptionRu } from '../lib/wikiDescriptions';
+import { apiUrl } from '../lib/apiUrl';
 
 export function MiniPlayer() {
   const navigate = useNavigate();
@@ -104,7 +105,7 @@ export function MiniPlayer() {
         .replace(/\s+/g, ' ')
         .trim() || previewTitle.trim();
       const query = `${previewArtist} - ${previewTitle}`;
-      const response = await fetch('/api/download', {
+      const response = await fetch(apiUrl('/api/download'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

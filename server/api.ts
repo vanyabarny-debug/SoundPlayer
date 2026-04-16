@@ -6,11 +6,29 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const app = express();
-const port = Number(process.env.API_PORT || 8787);
+const port = Number(process.env.PORT || process.env.API_PORT || 8787);
 const lyricsLookupCache = new Map<string, { lyrics: string; cachedAt: number }>();
 const LYRICS_CACHE_TTL_MS = 1000 * 60 * 60 * 12;
+const frontendOrigin = (process.env.FRONTEND_ORIGIN || '').trim();
+const allowAnyOrigin = frontendOrigin.length === 0;
 
 app.use(express.json());
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (allowAnyOrigin) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  } else if (origin === frontendOrigin) {
+    res.setHeader('Access-Control-Allow-Origin', frontendOrigin);
+    res.setHeader('Vary', 'Origin');
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') {
+    res.status(204).end();
+    return;
+  }
+  next();
+});
 
 const parseLastJsonObject = (stdout: string): Record<string, unknown> => {
   const text = stdout.trim();

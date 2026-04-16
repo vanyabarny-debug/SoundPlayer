@@ -38,6 +38,7 @@ import type { RadoogaCandidate, SeedTrack } from '../lib/radoogaRecommendations'
 import { pushNavigationEntry } from '../lib/navigationHistory';
 import { resolveArtistDescriptionRu } from '../lib/wikiDescriptions';
 import { ensureArtistBannerFromTrackCover } from '../lib/artistBannerCache';
+import { apiUrl } from '../lib/apiUrl';
 
 const sanitizeFilename = (value: string): string =>
   value
@@ -769,7 +770,7 @@ export function RadoogaPage() {
     setDownloadInFlightIds((prev) => ({ ...prev, [candidate.id]: true }));
     try {
     const downloadQuery = `${candidate.artist} - ${candidate.title}`;
-      const response = await fetch('/api/download', {
+      const response = await fetch(apiUrl('/api/download'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

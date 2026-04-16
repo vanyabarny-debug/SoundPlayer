@@ -10,11 +10,40 @@ View your app in AI Studio: https://ai.studio/apps/2a445a7f-7424-41b8-a452-1576d
 
 ## Run Locally
 
-**Prerequisites:**  Node.js
+**Prerequisites:** Node.js, Python 3, ffmpeg
 
+1. Install dependencies: `npm install`
+2. Create `.env.local` from `.env.example`
+3. Run frontend + API together: `npm run dev:full`
+4. Open `http://localhost:3000`
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+## Production Deploy (Cloudflare Pages + Separate API)
+
+### 1) Deploy API server (Docker)
+
+This project has a Node + Python API (`server/api.ts` + `media_engine.py`) and cannot run as a static-only deployment.
+
+- Build image with `Dockerfile.api`
+- Run command: `npm run api:prod`
+- Exposed port: `8787` (or `PORT` from platform)
+
+Required API environment variables:
+
+- `FRONTEND_ORIGIN=https://<your-pages-domain>`
+- `GENIUS_ACCESS_TOKEN` (optional for richer lyrics lookup)
+- `PEXELS_API_KEY` (optional)
+
+Healthcheck endpoint: `GET /api/health`
+
+### 2) Deploy frontend to Cloudflare Pages
+
+Build settings:
+
+- Build command: `npm run build`
+- Build output directory: `dist`
+
+Frontend environment variables:
+
+- `VITE_API_BASE_URL=https://<your-api-domain>`
+
+If `VITE_API_BASE_URL` is empty, app uses relative `/api/*` (good for local dev with Vite proxy).
