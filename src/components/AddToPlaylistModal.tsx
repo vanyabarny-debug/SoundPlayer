@@ -7,13 +7,15 @@ import { X, Plus } from 'lucide-react';
 interface AddToPlaylistModalProps {
   trackId: string;
   onClose: () => void;
+  onResult?: (status: 'added' | 'exists') => void;
 }
 
-export function AddToPlaylistModal({ trackId, onClose }: AddToPlaylistModalProps) {
+export function AddToPlaylistModal({ trackId, onClose, onResult }: AddToPlaylistModalProps) {
   const { playlists, updatePlaylist, addPlaylist } = useMockServer();
   const currentUserId = useAuthStore((state) => state.currentUserId);
   const [search, setSearch] = useState('');
   const [newPlaylistTitle, setNewPlaylistTitle] = useState('');
+  const [shareCopied, setShareCopied] = useState(false);
 
   const myPlaylists = Object.values(playlists).filter((p) => p.ownerId === currentUserId);
   
@@ -25,6 +27,9 @@ export function AddToPlaylistModal({ trackId, onClose }: AddToPlaylistModalProps
     const playlist = playlists[playlistId];
     if (!playlist.trackIds.includes(trackId)) {
       updatePlaylist(playlistId, { trackIds: [...playlist.trackIds, trackId] });
+      onResult?.('added');
+    } else {
+      onResult?.('exists');
     }
     onClose();
   };
@@ -38,7 +43,18 @@ export function AddToPlaylistModal({ trackId, onClose }: AddToPlaylistModalProps
       trackIds: [trackId],
       type: 'playlist',
     });
+    onResult?.('added');
     onClose();
+  };
+  const shareUrl = `${window.location.origin}/radooga?mode=track&seed=${encodeURIComponent(trackId)}`;
+  const handleCopyShare = async () => {
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setShareCopied(true);
+      window.setTimeout(() => setShareCopied(false), 1400);
+    } catch {
+      setShareCopied(false);
+    }
   };
 
   return createPortal(
@@ -75,6 +91,24 @@ export function AddToPlaylistModal({ trackId, onClose }: AddToPlaylistModalProps
             >
               Создать
             </button>
+          </div>
+          <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+            <div className="text-xs text-slate-500 mb-1">Ссылка на трек</div>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={shareUrl}
+                readOnly
+                className="flex-1 bg-white text-slate-600 px-3 py-2 rounded-lg border border-slate-200 text-xs"
+              />
+              <button
+                type="button"
+                onClick={() => void handleCopyShare()}
+                className="px-3 py-2 rounded-lg bg-violet-600 text-white text-xs"
+              >
+                {shareCopied ? 'Скопировано' : 'Копировать'}
+              </button>
+            </div>
           </div>
         </div>
 

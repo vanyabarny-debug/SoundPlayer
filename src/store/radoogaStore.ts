@@ -62,6 +62,7 @@ const getSeedTrackById = (seedTrackId: string | null): SeedTrack | null => {
 };
 
 const fallbackStats = (): FeedStats => ({ impressions: 0, likes: 0, skips: 0 });
+let latestFeedLoadRequestId = 0;
 
 const buildSeedStacks = (): SeedStacks => {
   const state = useMockServer.getState();
@@ -205,10 +206,14 @@ export const useRadoogaStore = create<RadoogaState>((set, get) => ({
   },
 
   openForYouFeed: async () => {
+    const requestId = ++latestFeedLoadRequestId;
     set({ mode: 'for-you', seedTrackId: null, trackSeed: null, isLoading: true, error: null, items: [], currentIndex: 0 });
     try {
       const state = get();
       const { seedTrack, batch } = await createFeedBatch('for-you', null, null, state.seenIds, state.seenArtists, state.recentLikedSeedIds, state.blockedArtistNames, state.sessionExcludedCandidateIds, state.recentSeedIds);
+      if (requestId !== latestFeedLoadRequestId) {
+        return;
+      }
       set((prev) => ({
         isLoading: false,
         items: batch,
@@ -220,11 +225,14 @@ export const useRadoogaStore = create<RadoogaState>((set, get) => ({
         sessionExcludedCandidateIds: batch.map((item) => item.id).slice(-400),
       }));
     } catch {
-      set({ isLoading: false, error: 'Не удалось загрузить ленту.' });
+      if (requestId === latestFeedLoadRequestId) {
+        set({ isLoading: false, error: 'Не удалось загрузить ленту.' });
+      }
     }
   },
 
   openTrackFeed: async (seedTrackId: string, seedTrack?: SeedTrack) => {
+    const requestId = ++latestFeedLoadRequestId;
     set({
       mode: 'track-seed',
       seedTrackId,
@@ -238,6 +246,9 @@ export const useRadoogaStore = create<RadoogaState>((set, get) => ({
     try {
       const state = get();
       const { seedTrack: resolvedSeedTrack, batch } = await createFeedBatch('track-seed', seedTrackId, seedTrack || null, state.seenIds, state.seenArtists, state.recentLikedSeedIds, state.blockedArtistNames, state.sessionExcludedCandidateIds, state.recentSeedIds);
+      if (requestId !== latestFeedLoadRequestId) {
+        return;
+      }
       set((prev) => ({
         isLoading: false,
         items: batch,
@@ -250,7 +261,9 @@ export const useRadoogaStore = create<RadoogaState>((set, get) => ({
         sessionExcludedCandidateIds: batch.map((item) => item.id).slice(-400),
       }));
     } catch {
-      set({ isLoading: false, error: 'Не удалось загрузить ленту по треку.' });
+      if (requestId === latestFeedLoadRequestId) {
+        set({ isLoading: false, error: 'Не удалось загрузить ленту по треку.' });
+      }
     }
   },
 

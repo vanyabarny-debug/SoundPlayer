@@ -43,38 +43,38 @@ function CreateArtistModal({ initialName, onSave, onClose, currentUserId }: { in
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[10000] bg-black/90 flex items-center justify-center p-4 backdrop-blur-md">
-      <div className="bg-zinc-900 w-full max-w-md rounded-3xl overflow-hidden flex flex-col">
-        <div className="flex items-center justify-between p-4 border-b border-zinc-800">
+    <div className="fixed inset-0 z-[10000] bg-slate-900/55 flex items-center justify-center p-4 backdrop-blur-md">
+      <div className="bg-white w-full max-w-md rounded-3xl overflow-hidden flex flex-col border border-slate-200">
+        <div className="flex items-center justify-between p-4 border-b border-slate-200">
           <h2 className="text-xl font-bold">Новый артист</h2>
-          <button onClick={onClose} className="p-2 text-zinc-400 hover:text-white">
+          <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-700">
             <X className="w-6 h-6" />
           </button>
         </div>
         <form onSubmit={handleSave} className="p-4 space-y-4">
           <div>
-            <label className="block text-xs font-medium text-zinc-400 mb-1">Имя артиста</label>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Имя артиста</label>
             <input
               type="text"
               value={name}
               onChange={e => setName(e.target.value)}
-              className="w-full bg-zinc-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-white/20"
+              className="w-full bg-slate-50 text-slate-700 px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-violet-200"
               required
               autoFocus
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-zinc-400 mb-1">Описание</label>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Описание</label>
             <textarea
               value={description}
               onChange={e => setDescription(e.target.value)}
-              className="w-full bg-zinc-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-white/20 resize-none h-24"
+              className="w-full bg-slate-50 text-slate-700 px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-violet-200 resize-none h-24"
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-zinc-400 mb-1">Баннер артиста</label>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Баннер артиста</label>
             <div 
-              className="w-full h-32 bg-zinc-800 rounded-xl border-2 border-dashed border-zinc-700 flex flex-col items-center justify-center cursor-pointer hover:bg-zinc-700/50 transition-colors relative overflow-hidden"
+              className="w-full h-32 bg-slate-50 rounded-xl border-2 border-dashed border-slate-300 flex flex-col items-center justify-center cursor-pointer hover:bg-slate-100 transition-colors relative overflow-hidden"
               onClick={() => fileInputRef.current?.click()}
             >
               <input 
@@ -88,14 +88,14 @@ function CreateArtistModal({ initialName, onSave, onClose, currentUserId }: { in
                 <img src={bannerPreview} alt="Preview" className="w-full h-full object-cover" />
               ) : (
                 <>
-                  <Upload className="w-6 h-6 text-zinc-500 mb-2" />
-                  <span className="text-xs font-medium text-zinc-400">Выбрать фото</span>
+                  <Upload className="w-6 h-6 text-slate-400 mb-2" />
+                  <span className="text-xs font-medium text-slate-500">Выбрать фото</span>
                 </>
               )}
             </div>
           </div>
           <div className="pt-4">
-            <button type="submit" className="w-full bg-white text-black font-bold py-3 rounded-xl hover:bg-zinc-200 transition-colors">
+            <button type="submit" className="w-full bg-violet-600 text-white font-bold py-3 rounded-xl hover:bg-violet-700 transition-colors">
               Сохранить артиста
             </button>
           </div>
@@ -250,9 +250,8 @@ export function UploadTrackModal({ onClose }: { onClose: () => void }) {
     const user = users[currentUserId];
     if (user) {
       const favoriteTrackIds = user.favoriteTrackIds || [];
-      if (!favoriteTrackIds.includes(trackId)) {
-        updateUser(user.id, { favoriteTrackIds: [...favoriteTrackIds, trackId] });
-      }
+      const nextFavorites = [trackId, ...favoriteTrackIds.filter((id) => id !== trackId)];
+      updateUser(user.id, { favoriteTrackIds: nextFavorites });
     }
 
     // Auto-create artists if they don't exist
@@ -290,11 +289,11 @@ export function UploadTrackModal({ onClose }: { onClose: () => void }) {
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm">
-      <div className="bg-zinc-900 w-full max-w-md rounded-3xl overflow-hidden flex flex-col max-h-[90vh]">
-        <div className="flex items-center justify-between p-4 border-b border-zinc-800">
+    <div className="fixed inset-0 z-[9999] bg-slate-900/55 flex items-center justify-center p-4 backdrop-blur-sm">
+      <div className="bg-white w-full max-w-md rounded-3xl overflow-hidden flex flex-col max-h-[90vh] border border-slate-200">
+        <div className="flex items-center justify-between p-4 border-b border-slate-200">
           <h2 className="text-xl font-bold">Загрузить трек</h2>
-          <button onClick={onClose} className="p-2 text-zinc-400 hover:text-white">
+          <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-700">
             <X className="w-6 h-6" />
           </button>
         </div>
@@ -303,7 +302,7 @@ export function UploadTrackModal({ onClose }: { onClose: () => void }) {
           <form id="upload-form" onSubmit={handleSubmit} className="space-y-4">
             
             <div
-              className="border-2 border-dashed border-zinc-700 rounded-2xl p-8 flex flex-col items-center justify-center cursor-pointer hover:border-zinc-500 transition-colors"
+              className="border-2 border-dashed border-slate-300 rounded-2xl p-8 flex flex-col items-center justify-center cursor-pointer hover:border-slate-400 bg-slate-50 transition-colors"
               onClick={() => fileInputRef.current?.click()}
             >
               <input 
@@ -315,15 +314,15 @@ export function UploadTrackModal({ onClose }: { onClose: () => void }) {
               />
               {file ? (
                 <>
-                  <Music className="w-12 h-12 text-indigo-500 mb-2" />
+                  <Music className="w-12 h-12 text-violet-500 mb-2" />
                   <span className="text-sm font-medium text-center">{file.name}</span>
-                  <span className="text-xs text-zinc-500 mt-1">{(file.size / 1024 / 1024).toFixed(2)} MB</span>
+                  <span className="text-xs text-slate-500 mt-1">{(file.size / 1024 / 1024).toFixed(2)} MB</span>
                 </>
               ) : (
                 <>
-                  <Upload className="w-12 h-12 text-zinc-500 mb-2" />
-                  <span className="text-sm font-medium text-zinc-400">Выбрать аудиофайл</span>
-                  <span className="text-xs text-zinc-600 mt-1">MP3, WAV, FLAC, M4A</span>
+                  <Upload className="w-12 h-12 text-slate-400 mb-2" />
+                  <span className="text-sm font-medium text-slate-600">Выбрать аудиофайл</span>
+                  <span className="text-xs text-slate-500 mt-1">MP3, WAV, FLAC, M4A</span>
                 </>
               )}
             </div>
@@ -331,18 +330,18 @@ export function UploadTrackModal({ onClose }: { onClose: () => void }) {
             {file && (
               <div className="space-y-4">
                 <div>
-                  <label className="block text-xs font-medium text-zinc-400 mb-1">Название трека</label>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Название трека</label>
                   <input
                     type="text"
                     value={title}
                     onChange={e => setTitle(e.target.value)}
-                    className="w-full bg-zinc-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-white/20"
+                    className="w-full bg-slate-50 text-slate-700 px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-violet-200"
                     required
                   />
                 </div>
                 
                 <div className="relative" ref={artistInputRef}>
-                  <label className="block text-xs font-medium text-zinc-400 mb-1">Артист (через запятую)</label>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Артист (через запятую)</label>
                   <input
                     type="text"
                     value={artist}
@@ -351,20 +350,20 @@ export function UploadTrackModal({ onClose }: { onClose: () => void }) {
                       setShowArtistDropdown(true);
                     }}
                     onFocus={() => setShowArtistDropdown(true)}
-                    className="w-full bg-zinc-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-white/20"
+                    className="w-full bg-slate-50 text-slate-700 px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-violet-200"
                     required
                     autoComplete="off"
                   />
                   {showArtistDropdown && currentArtistSearch && (
-                    <div className="absolute z-10 w-full mt-1 bg-zinc-800 border border-zinc-700 rounded-xl shadow-xl max-h-48 overflow-y-auto">
+                    <div className="absolute z-10 w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl max-h-48 overflow-y-auto">
                       {filteredArtists.map(a => (
                         <button
                           key={a.id}
                           type="button"
                           onClick={() => handleSelectArtist(a.name)}
-                          className="w-full text-left px-4 py-2 hover:bg-zinc-700 text-sm flex items-center gap-2"
+                          className="w-full text-left px-4 py-2 hover:bg-slate-100 text-sm flex items-center gap-2"
                         >
-                          <Search className="w-4 h-4 text-zinc-400" />
+                          <Search className="w-4 h-4 text-slate-400" />
                           {a.name}
                         </button>
                       ))}
@@ -372,10 +371,10 @@ export function UploadTrackModal({ onClose }: { onClose: () => void }) {
                         <button
                           type="button"
                           onClick={() => setCreatingArtistName(currentArtistSearch)}
-                          className="w-full text-left px-4 py-2 hover:bg-zinc-700 text-sm text-indigo-400 flex items-center gap-2"
+                          className="w-full text-left px-4 py-2 hover:bg-slate-100 text-sm text-violet-600 flex items-center gap-2"
                         >
                           <Plus className="w-4 h-4" />
-                          Создать артиста: <span className="font-bold text-white">{currentArtistSearch}</span>
+                          Создать артиста: <span className="font-bold text-slate-700">{currentArtistSearch}</span>
                         </button>
                       )}
                     </div>
@@ -388,9 +387,9 @@ export function UploadTrackModal({ onClose }: { onClose: () => void }) {
                       type="checkbox" 
                       checked={isExplicit} 
                       onChange={e => setIsExplicit(e.target.checked)}
-                      className="w-4 h-4 rounded border-zinc-700 bg-zinc-800 text-indigo-500 focus:ring-indigo-500"
+                      className="w-4 h-4 rounded border-slate-300 bg-white text-indigo-500 focus:ring-indigo-500"
                     />
-                    <span className="text-sm text-zinc-300">Ненормативная лексика (E)</span>
+                    <span className="text-sm text-slate-600">Ненормативная лексика (E)</span>
                   </label>
                   
                   <label className="flex items-center gap-2 cursor-pointer">
@@ -398,36 +397,36 @@ export function UploadTrackModal({ onClose }: { onClose: () => void }) {
                       type="checkbox" 
                       checked={isSingle} 
                       onChange={e => setIsSingle(e.target.checked)}
-                      className="w-4 h-4 rounded border-zinc-700 bg-zinc-800 text-indigo-500 focus:ring-indigo-500"
+                      className="w-4 h-4 rounded border-slate-300 bg-white text-indigo-500 focus:ring-indigo-500"
                     />
-                    <span className="text-sm text-zinc-300">Сингл</span>
+                    <span className="text-sm text-slate-600">Сингл</span>
                   </label>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-zinc-400 mb-1">Фиты (через запятую)</label>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Фиты (через запятую)</label>
                   <input
                     type="text"
                     value={features}
                     onChange={e => setFeatures(e.target.value)}
-                    className="w-full bg-zinc-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-white/20"
+                    className="w-full bg-slate-50 text-slate-700 px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-violet-200"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-zinc-400 mb-1">Текст песни</label>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Текст песни</label>
                   <textarea
                     value={lyrics}
                     onChange={e => setLyrics(e.target.value)}
                     rows={4}
-                    className="w-full bg-zinc-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-white/20 resize-none"
+                    className="w-full bg-slate-50 text-slate-700 px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-violet-200 resize-none"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-zinc-400 mb-1">Обложка трека</label>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Обложка трека</label>
                   <div 
-                    className="w-full h-32 bg-zinc-800 rounded-xl border-2 border-dashed border-zinc-700 flex flex-col items-center justify-center cursor-pointer hover:bg-zinc-700/50 transition-colors relative overflow-hidden"
+                    className="w-full h-32 bg-slate-50 rounded-xl border-2 border-dashed border-slate-300 flex flex-col items-center justify-center cursor-pointer hover:bg-slate-100 transition-colors relative overflow-hidden"
                     onClick={() => coverInputRef.current?.click()}
                   >
                     <input 
@@ -441,8 +440,8 @@ export function UploadTrackModal({ onClose }: { onClose: () => void }) {
                       <img src={coverPreview} alt="Preview" className="w-full h-full object-cover" />
                     ) : (
                       <>
-                        <Upload className="w-6 h-6 text-zinc-500 mb-2" />
-                        <span className="text-xs font-medium text-zinc-400">Выбрать фото</span>
+                        <Upload className="w-6 h-6 text-slate-400 mb-2" />
+                        <span className="text-xs font-medium text-slate-500">Выбрать фото</span>
                       </>
                     )}
                   </div>
@@ -452,12 +451,12 @@ export function UploadTrackModal({ onClose }: { onClose: () => void }) {
           </form>
         </div>
         
-        <div className="p-4 border-t border-zinc-800">
+        <div className="p-4 border-t border-slate-200">
           <div className="flex gap-3">
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 px-4 py-2 bg-zinc-800 text-white rounded-lg hover:bg-zinc-700 transition-colors font-medium"
+              className="flex-1 px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-colors font-medium"
             >
               Отмена
             </button>
@@ -465,7 +464,7 @@ export function UploadTrackModal({ onClose }: { onClose: () => void }) {
               type="submit"
               form="upload-form"
               disabled={!file}
-              className="flex-1 px-4 py-2 bg-white text-black rounded-lg hover:bg-zinc-200 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex-1 px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Загрузить
             </button>

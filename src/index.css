@@ -61,6 +61,25 @@ select,
   border: none;
 }
 
+.karaoke-slider {
+  border-radius: 0 !important;
+}
+
+.karaoke-slider::-webkit-slider-runnable-track {
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+
+.karaoke-slider::-moz-range-track {
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+
+.karaoke-slider::-moz-range-progress {
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+
 .bg-violet-500 {
   background-color: var(--accent-color) !important;
 }

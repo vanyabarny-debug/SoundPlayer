@@ -674,7 +674,9 @@ export const buildFeedBatch = async ({
     sliced.length === 0
       ? sliced
       : sliced.map((candidate, index) =>
-          index === spotlightIndex ? { ...candidate, cardSurface: 'pexels-popular' as const } : candidate
+          (index <= 1 || index === spotlightIndex || index % 2 === 0)
+            ? { ...candidate, cardSurface: 'pexels-popular' as const }
+            : candidate
         );
   return {
     items,

@@ -8,6 +8,11 @@ type PreviewTrack = {
   artworkUrl?: string;
 };
 
+type AudioOutputDevice = {
+  deviceId: string;
+  label: string;
+};
+
 interface PlayerState {
   currentTrackId: string | null;
   currentPreviewKey: string | null;
@@ -29,6 +34,9 @@ interface PlayerState {
   audioEnergy: number;
   audioBands: number[];
   audioTick: number;
+  audioOutputDeviceId: string;
+  audioOutputDevices: AudioOutputDevice[];
+  isAudioOutputSwitchSupported: boolean;
   
   playTrack: (trackId: string, queue?: string[], albumId?: string | null) => void;
   playPreview: (preview: PreviewTrack, queue?: PreviewTrack[]) => void;
@@ -46,6 +54,9 @@ interface PlayerState {
   seek: (time: number) => void;
   clearSeekRequest: () => void;
   updateAudioMetrics: (metrics: { energy: number; bands: number[] }) => void;
+  setAudioOutputDeviceId: (deviceId: string) => void;
+  setAudioOutputDevices: (devices: AudioOutputDevice[]) => void;
+  setAudioOutputSwitchSupported: (supported: boolean) => void;
 }
 
 export const usePlayerStore = create<PlayerState>((set, get) => ({
@@ -69,6 +80,9 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   audioEnergy: 0,
   audioBands: [0, 0, 0, 0, 0, 0, 0, 0],
   audioTick: 0,
+  audioOutputDeviceId: 'default',
+  audioOutputDevices: [],
+  isAudioOutputSwitchSupported: false,
 
   playTrack: (trackId, queue, albumId = null) => set((state) => {
     if (trackId === state.currentTrackId && albumId === state.currentAlbumId) {
@@ -194,4 +208,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       audioBands: bands.slice(0, 8),
       audioTick: state.audioTick + 1,
     })),
+  setAudioOutputDeviceId: (deviceId) => set({ audioOutputDeviceId: deviceId }),
+  setAudioOutputDevices: (devices) => set({ audioOutputDevices: devices }),
+  setAudioOutputSwitchSupported: (supported) => set({ isAudioOutputSwitchSupported: supported }),
 }));

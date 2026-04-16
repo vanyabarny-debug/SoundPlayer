@@ -11,8 +11,10 @@ import { getAverageColor } from '../lib/colorExtractor';
 export function Layout({ children }: { children: ReactNode }) {
   const location = useLocation();
   const currentTrackId = usePlayerStore(state => state.currentTrackId);
+  const currentPreviewKey = usePlayerStore(state => state.currentPreviewKey);
   const tracks = useMockServer(state => state.tracks);
   const isRadoogaPage = location.pathname === '/radooga';
+  const hasMiniPlayer = Boolean(currentTrackId || currentPreviewKey);
 
   useEffect(() => {
   }, [location.pathname]);
@@ -55,7 +57,7 @@ export function Layout({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex flex-col h-[100dvh] bg-gradient-to-b from-violet-50 via-sky-50 to-slate-100 text-slate-700 overflow-hidden">
-      <main className={`flex-1 overflow-y-auto ${isRadoogaPage ? 'pb-16' : 'pb-32'}`}>
+      <main className={`flex-1 overflow-y-auto ${isRadoogaPage ? 'pb-16' : hasMiniPlayer ? 'pb-32' : 'pb-16'}`}>
         {children}
       </main>
       <div className="fixed bottom-0 left-0 right-0 z-50">

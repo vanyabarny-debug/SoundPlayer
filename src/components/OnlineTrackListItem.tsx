@@ -21,6 +21,7 @@ interface OnlineTrackListItemProps {
   canDownload?: boolean;
   isDownloading?: boolean;
   isDownloaded?: boolean;
+  emphasizeDownloaded?: boolean;
   onPlay: () => void;
   onDownload?: () => void;
   onArtistClick?: (artistName: string) => void;
@@ -37,6 +38,7 @@ export function OnlineTrackListItem({
   canDownload = false,
   isDownloading = false,
   isDownloaded = false,
+  emphasizeDownloaded = false,
   onPlay,
   onDownload,
   onArtistClick,
@@ -45,9 +47,12 @@ export function OnlineTrackListItem({
   const showPause = isActive && isPlaying;
   const artistParts = splitArtistField(track.artist);
   const clickableArtists = Array.from(new Set([...artistParts.primaryArtists, ...artistParts.featuringArtists]));
+  const rowToneClass = emphasizeDownloaded && isDownloaded
+    ? 'bg-white/85 border border-violet-200/70 shadow-sm shadow-violet-100/60 hover:bg-white'
+    : 'bg-white/45 hover:bg-slate-200/45';
 
   return (
-    <div className="w-full text-left flex items-center gap-3 p-2 rounded-3xl hover:bg-slate-200/45 transition-colors group relative">
+    <div className={`w-full text-left flex items-center gap-3 p-2 rounded-3xl transition-colors group relative ${rowToneClass}`}>
       <div
         onClick={onPlay}
         className="w-12 h-12 bg-violet-100 rounded-[2px] overflow-hidden flex-shrink-0 relative cursor-pointer"

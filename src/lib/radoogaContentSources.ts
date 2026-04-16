@@ -424,34 +424,11 @@ const fetchRssAsNewsItems = async (rssUrl: string): Promise<NewsFeedItem[]> => {
   }
 };
 
-/** Две заметные заглушки на каждую живую новость — меньше «плотности» текста в карусели. */
+/** Убираем текстовые заглушки: показываем только реальные новости из ленты. */
 const interleaveNewsPlaceholders = (live: RadoogaNewsItem[], candidate: RadoogaCandidate): RadoogaNewsItem[] => {
+  void candidate;
   const real = live.filter((n) => !n.placeholder);
-  if (real.length === 0) return live;
-  const searchUrl = `https://news.google.com/search?q=${encodeURIComponent(`${candidate.artist} music news`)}`;
-  const stubA: RadoogaNewsItem = {
-    title: `Слот · ${candidate.artist}`,
-    summary: 'Пустая карточка. Смахните влево/вправо или откройте поиск по теме ниже.',
-    source: 'Radooga',
-    publishedAt: new Date().toISOString(),
-    url: searchUrl,
-    placeholder: true,
-  };
-  const stubB: RadoogaNewsItem = {
-    title: 'Резерв',
-    summary: 'Здесь могла быть заметка из ленты. Листайте к следующей карточке.',
-    source: 'Radooga',
-    publishedAt: new Date().toISOString(),
-    url: searchUrl,
-    placeholder: true,
-  };
-  const out: RadoogaNewsItem[] = [];
-  for (const n of real) {
-    out.push({ ...stubA });
-    out.push({ ...stubB });
-    out.push(n);
-  }
-  return out.slice(0, 18);
+  return real.slice(0, 18);
 };
 
 /** Вертикальные фоновые клипы из Pexels Video API. */
@@ -613,7 +590,40 @@ export const getPexelsAmbientFallbackClips = (): RadoogaPexelsClip[] => [
     videoUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
     pageUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/',
   },
+  {
+    id: 'fallback-sample-escapes',
+    title: 'Запасной ролик',
+    videoUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
+    pageUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/',
+  },
+  {
+    id: 'fallback-sample-fun',
+    title: 'Запасной ролик',
+    videoUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
+    pageUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/',
+  },
+  {
+    id: 'fallback-sample-joyrides',
+    title: 'Запасной ролик',
+    videoUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4',
+    pageUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/',
+  },
+  {
+    id: 'fallback-sample-meltdowns',
+    title: 'Запасной ролик',
+    videoUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4',
+    pageUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/',
+  },
 ];
+
+/** Возвращает fallback-клипы с приоритетом тех, что недавно не показывались. */
+export const pickPexelsAmbientFallbackClips = (limit = 4): RadoogaPexelsClip[] => {
+  const base = getPexelsAmbientFallbackClips();
+  if (base.length === 0 || limit <= 0) return [];
+  const fresh = base.filter((clip) => !isPexelsRecentlyShown(clip));
+  const pool = fresh.length > 0 ? fresh : base;
+  return pool.slice(0, Math.min(limit, pool.length));
+};
 
 const mergePexelsAvoidingRecent = (
   into: RadoogaPexelsClip[],
@@ -638,6 +648,9 @@ export const resolvePexelsClips = async (
   const rawQueries = buildPexelsSearchQueries(candidate, opts?.lyricsSnippet);
   const seed = hashStringSeed(candidate.id);
   const queries = shuffleWithSeed(rawQueries, seed);
+  // #region agent log
+  fetch('http://127.0.0.1:7256/ingest/59c4ea1f-4267-4a06-ab6d-96fcc05a4b36',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d7795d'},body:JSON.stringify({sessionId:'d7795d',runId:'run1',hypothesisId:'H1',location:'src/lib/radoogaContentSources.ts:641',message:'resolvePexelsClips query seed',data:{trackId:candidate.id,artist:candidate.artist,title:candidate.title,rawQueries:rawQueries.length,firstQuery:queries[0]||null},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
   const merged: RadoogaPexelsClip[] = [];
   const seenUrl = new Set<string>();
 
@@ -647,6 +660,9 @@ export const resolvePexelsClips = async (
         const page = ((seed + i) % 3) + 1;
         try {
           const items = await fetchPexelsClipsOnce(q, page);
+          // #region agent log
+          fetch('http://127.0.0.1:7256/ingest/59c4ea1f-4267-4a06-ab6d-96fcc05a4b36',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d7795d'},body:JSON.stringify({sessionId:'d7795d',runId:'run1',hypothesisId:'H2',location:'src/lib/radoogaContentSources.ts:654',message:'resolvePexelsClips fetched page',data:{trackId:candidate.id,query:q.slice(0,80),page,items:items.length,firstItemId:items[0]?.id||null,firstItemUrl:items[0]?.videoUrl||null,skipRecent},timestamp:Date.now()})}).catch(()=>{});
+          // #endregion
           mergePexelsAvoidingRecent(merged, items, seenUrl, skipRecent);
           if (merged.length >= 12) return;
         } catch {
@@ -663,11 +679,61 @@ export const resolvePexelsClips = async (
   }
 
   if (merged.length > 0) {
+    // #region agent log
+    fetch('http://127.0.0.1:7256/ingest/59c4ea1f-4267-4a06-ab6d-96fcc05a4b36',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d7795d'},body:JSON.stringify({sessionId:'d7795d',runId:'run1',hypothesisId:'H3',location:'src/lib/radoogaContentSources.ts:672',message:'resolvePexelsClips merged result',data:{trackId:candidate.id,merged:merged.length,firstId:merged[0]?.id||null,firstUrl:merged[0]?.videoUrl||null,lastId:merged[merged.length-1]?.id||null},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     debugResolver('pexels', `merged:${merged.length} queries:${queries.length}`);
     return merged.slice(0, 12);
   }
+  // #region agent log
+  fetch('http://127.0.0.1:7256/ingest/59c4ea1f-4267-4a06-ab6d-96fcc05a4b36',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d7795d'},body:JSON.stringify({sessionId:'d7795d',runId:'run1',hypothesisId:'H4',location:'src/lib/radoogaContentSources.ts:677',message:'resolvePexelsClips empty fallback path',data:{trackId:candidate.id,queries:queries.length},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
   debugResolver('pexels', 'all-queries-empty');
   return [];
+};
+
+const RANDOM_PEXELS_QUERIES = [
+  'nature landscape',
+  'mountains landscape',
+  'forest landscape',
+  'ocean waves',
+  'waterfall nature',
+  'sunset landscape',
+  'abstract textures',
+  'abstract colors',
+  'aerial landscape',
+  'foggy forest',
+  'desert dunes',
+  'abstract background',
+  'abstract fluid',
+  'minimal abstract',
+  'nature scenery',
+];
+
+/** Полностью случайная выборка из Pexels без привязки к треку. */
+export const resolveRandomPexelsClips = async (): Promise<RadoogaPexelsClip[]> => {
+  const attempts = 4;
+  const merged: RadoogaPexelsClip[] = [];
+  const seen = new Set<string>();
+
+  for (let i = 0; i < attempts; i += 1) {
+    const query = RANDOM_PEXELS_QUERIES[Math.floor(Math.random() * RANDOM_PEXELS_QUERIES.length)] || 'aesthetic';
+    const page = 1 + Math.floor(Math.random() * 12);
+    try {
+      const items = await fetchPexelsClipsOnce(query, page);
+      for (const it of items) {
+        if (!it.videoUrl || seen.has(it.videoUrl)) continue;
+        seen.add(it.videoUrl);
+        merged.push(it);
+        if (merged.length >= 12) break;
+      }
+    } catch {
+      /* ignore random attempt failures */
+    }
+    if (merged.length >= 12) break;
+  }
+
+  return merged.slice(0, 12);
 };
 
 export const resolveLiveNews = async (candidate: RadoogaCandidate): Promise<RadoogaNewsItem[]> => {

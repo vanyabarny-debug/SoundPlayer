@@ -67,11 +67,11 @@ export function EditTrackModal({ track, onClose }: { track: TrackMetadata, onClo
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm">
-      <div className="bg-zinc-900 w-full max-w-md rounded-3xl overflow-hidden flex flex-col max-h-[90vh]">
-        <div className="flex items-center justify-between p-4 border-b border-zinc-800">
+    <div className="fixed inset-0 z-[9999] bg-slate-900/55 flex items-center justify-center p-4 backdrop-blur-sm">
+      <div className="bg-white w-full max-w-md rounded-3xl overflow-hidden flex flex-col max-h-[90vh] border border-slate-200">
+        <div className="flex items-center justify-between p-4 border-b border-slate-200">
           <h2 className="text-xl font-bold">Редактировать трек</h2>
-          <button onClick={onClose} className="p-2 text-zinc-400 hover:text-white">
+          <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-700">
             <X className="w-6 h-6" />
           </button>
         </div>
@@ -79,23 +79,23 @@ export function EditTrackModal({ track, onClose }: { track: TrackMetadata, onClo
         <div className="overflow-y-auto p-4 flex-1">
           <form id="edit-form" onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-xs font-medium text-zinc-400 mb-1">Название трека</label>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Название трека</label>
               <input
                 type="text"
                 value={title}
                 onChange={e => setTitle(e.target.value)}
-                className="w-full bg-zinc-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-white/20"
+                className="w-full bg-slate-50 text-slate-700 px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-violet-200"
                 required
               />
             </div>
             
             <div>
-              <label className="block text-xs font-medium text-zinc-400 mb-1">Артист (через запятую)</label>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Артист (через запятую)</label>
               <input
                 type="text"
                 value={artist}
                 onChange={e => setArtist(e.target.value)}
-                className="w-full bg-zinc-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-white/20"
+                className="w-full bg-slate-50 text-slate-700 px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-violet-200"
                 required
               />
             </div>
@@ -106,9 +106,9 @@ export function EditTrackModal({ track, onClose }: { track: TrackMetadata, onClo
                   type="checkbox" 
                   checked={isExplicit} 
                   onChange={e => setIsExplicit(e.target.checked)}
-                  className="w-4 h-4 rounded border-zinc-700 bg-zinc-800 text-indigo-500 focus:ring-indigo-500"
+                    className="w-4 h-4 rounded border-slate-300 bg-white text-indigo-500 focus:ring-indigo-500"
                 />
-                <span className="text-sm text-zinc-300">Ненормативная лексика (E)</span>
+                <span className="text-sm text-slate-600">Ненормативная лексика (E)</span>
               </label>
               
               <label className="flex items-center gap-2 cursor-pointer">
@@ -116,46 +116,46 @@ export function EditTrackModal({ track, onClose }: { track: TrackMetadata, onClo
                   type="checkbox" 
                   checked={isSingle} 
                   onChange={e => setIsSingle(e.target.checked)}
-                  className="w-4 h-4 rounded border-zinc-700 bg-zinc-800 text-indigo-500 focus:ring-indigo-500"
+                    className="w-4 h-4 rounded border-slate-300 bg-white text-indigo-500 focus:ring-indigo-500"
                 />
-                <span className="text-sm text-zinc-300">Сингл</span>
+                <span className="text-sm text-slate-600">Сингл</span>
               </label>
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-zinc-400 mb-1">Продюсер</label>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Продюсер</label>
               <input
                 type="text"
                 value={producer}
                 onChange={e => setProducer(e.target.value)}
-                className="w-full bg-zinc-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-white/20"
+                className="w-full bg-slate-50 text-slate-700 px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-violet-200"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-zinc-400 mb-1">Фиты (через запятую)</label>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Фиты (через запятую)</label>
               <input
                 type="text"
                 value={features}
                 onChange={e => setFeatures(e.target.value)}
-                className="w-full bg-zinc-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-white/20"
+                className="w-full bg-slate-50 text-slate-700 px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-violet-200"
               />
             </div>
 
             <div>
-                <label className="block text-xs font-medium text-zinc-400 mb-1">Текст песни</label>
+                <label className="block text-xs font-medium text-slate-500 mb-1">Текст песни</label>
               <textarea
                 value={lyrics}
                 onChange={e => setLyrics(e.target.value)}
                 rows={4}
-                className="w-full bg-zinc-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-white/20 resize-none"
+                className="w-full bg-slate-50 text-slate-700 px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-violet-200 resize-none"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-zinc-400 mb-1">Обложка трека</label>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Обложка трека</label>
               <div 
-                className="w-full h-32 bg-zinc-800 rounded-xl border-2 border-dashed border-zinc-700 flex flex-col items-center justify-center cursor-pointer hover:bg-zinc-700/50 transition-colors relative overflow-hidden"
+                className="w-full h-32 bg-slate-50 rounded-xl border-2 border-dashed border-slate-300 flex flex-col items-center justify-center cursor-pointer hover:bg-slate-100 transition-colors relative overflow-hidden"
                 onClick={() => coverInputRef.current?.click()}
               >
                 <input 
@@ -169,8 +169,8 @@ export function EditTrackModal({ track, onClose }: { track: TrackMetadata, onClo
                   <CachedImage src={coverPreview} alt="Preview" className="w-full h-full object-cover" />
                 ) : (
                   <>
-                    <Upload className="w-6 h-6 text-zinc-500 mb-2" />
-                    <span className="text-xs font-medium text-zinc-400">Выбрать фото</span>
+                    <Upload className="w-6 h-6 text-slate-400 mb-2" />
+                    <span className="text-xs font-medium text-slate-500">Выбрать фото</span>
                   </>
                 )}
               </div>
@@ -178,11 +178,11 @@ export function EditTrackModal({ track, onClose }: { track: TrackMetadata, onClo
           </form>
         </div>
         
-        <div className="p-4 border-t border-zinc-800">
+        <div className="p-4 border-t border-slate-200">
           <button
             type="submit"
             form="edit-form"
-            className="w-full bg-white text-black font-bold py-3 rounded-xl hover:bg-zinc-200 transition-colors"
+            className="w-full bg-violet-600 text-white font-bold py-3 rounded-xl hover:bg-violet-700 transition-colors"
           >
             Сохранить изменения
           </button>

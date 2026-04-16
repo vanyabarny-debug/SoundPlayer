@@ -1,5 +1,5 @@
 import { User, Compass } from 'lucide-react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '../lib/utils';
 import { useRadoogaStore } from '../store/radoogaStore';
 
@@ -13,6 +13,7 @@ function RadoogaRainbowIcon({ className }: { className?: string }) {
 
 export function BottomNav() {
   const location = useLocation();
+  const navigate = useNavigate();
   const isRadoogaPage = location.pathname === '/radooga';
   const { prefetchNextBatch } = useRadoogaStore();
 
@@ -36,6 +37,14 @@ export function BottomNav() {
             <Link
               key={item.path}
               to={item.path}
+              state={item.path === '/browse' ? { browseTabEntry: true } : undefined}
+              onClick={(event) => {
+                if (item.path !== '/browse') return;
+                if (location.pathname === '/browse') {
+                  event.preventDefault();
+                  navigate('/browse', { state: { browseTabEntry: true } });
+                }
+              }}
               onMouseEnter={() => {
                 if (item.path === '/radooga') {
                   void prefetchNextBatch();

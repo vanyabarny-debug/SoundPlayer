@@ -11,6 +11,9 @@ import { TrackListItem } from '../components/TrackListItem';
 import { resolveArtistId, resolveArtistRoute } from '../lib/artistRouting';
 import { OnlineTrackItemData, OnlineTrackListItem } from '../components/OnlineTrackListItem';
 import { getAverageColor } from '../lib/colorExtractor';
+import { popNavigationEntry, pushNavigationEntry } from '../lib/navigationHistory';
+import { resolveAlbumDescriptionRu } from '../lib/wikiDescriptions';
+import { ensureArtistBannerFromTrackCover } from '../lib/artistBannerCache';
 
 export function AlbumPage() {
   const { id } = useParams<{ id: string }>();
@@ -28,9 +31,28 @@ export function AlbumPage() {
   const { playlists, albums, tracks, artists, addPlaylist, updatePlaylist, addAlbum, updateAlbum, addArtist, addTrack, updateTrack, users, updateUser } = useMockServer();
   const { playTrack, playPreview, togglePlay, currentTrackId, currentPreviewKey, isPlaying } = usePlayerStore();
   const { currentUserId } = useAuthStore();
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const getAlbumBackState = () => {
+    const state = (location.state || {}) as Record<string, unknown>;
+    return {
+      ...(state.fromBrowse ? { fromBrowse: true, browseReturnCtx: state.browseReturnCtx } : {}),
+      restorePageScrollTop: scrollContainerRef.current?.scrollTop || 0,
+    };
+  };
   const handleBack = () => {
+    const stacked = popNavigationEntry(`${location.pathname}${location.search}`);
+    if (stacked) {
+      // #region agent log
+      fetch('http://127.0.0.1:7256/ingest/59c4ea1f-4267-4a06-ab6d-96fcc05a4b36',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'bf06a6'},body:JSON.stringify({sessionId:'bf06a6',runId:'run2',hypothesisId:'H8',location:'src/pages/AlbumPage.tsx:45',message:'album handleBack uses stacked path',data:{currentPath:`${location.pathname}${location.search}`,targetPath:stacked.path,hasState:Boolean(stacked.state)},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+      navigate(stacked.path, { replace: true, state: stacked.state });
+      return;
+    }
     const state = location.state as { fromBrowse?: boolean; browseReturnCtx?: unknown; fromArtist?: boolean; returnToArtist?: string } | null;
     if (state?.fromArtist && state.returnToArtist) {
+      // #region agent log
+      fetch('http://127.0.0.1:7256/ingest/59c4ea1f-4267-4a06-ab6d-96fcc05a4b36',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'bf06a6'},body:JSON.stringify({sessionId:'bf06a6',runId:'run2',hypothesisId:'H8',location:'src/pages/AlbumPage.tsx:50',message:'album handleBack uses returnToArtist',data:{currentPath:`${location.pathname}${location.search}`,targetPath:state.returnToArtist},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       navigate(state.returnToArtist);
       return;
     }
@@ -46,11 +68,27 @@ export function AlbumPage() {
     }
     const restoreBrowseCtx = stateCtx || (state?.fromBrowse ? fallbackCtx : null);
     if (restoreBrowseCtx) {
+      // #region agent log
+      fetch('http://127.0.0.1:7256/ingest/59c4ea1f-4267-4a06-ab6d-96fcc05a4b36',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'bf06a6'},body:JSON.stringify({sessionId:'bf06a6',runId:'run2',hypothesisId:'H8',location:'src/pages/AlbumPage.tsx:65',message:'album handleBack uses browse context',data:{currentPath:`${location.pathname}${location.search}`},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       navigate('/browse', { state: { restoreBrowseCtx } });
       return;
     }
+    // #region agent log
+    fetch('http://127.0.0.1:7256/ingest/59c4ea1f-4267-4a06-ab6d-96fcc05a4b36',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'bf06a6'},body:JSON.stringify({sessionId:'bf06a6',runId:'run2',hypothesisId:'H8',location:'src/pages/AlbumPage.tsx:68',message:'album handleBack uses navigate -1',data:{currentPath:`${location.pathname}${location.search}`},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     navigate(-1);
   };
+  useEffect(() => {
+    const restoreTop = (location.state as { restorePageScrollTop?: number } | null)?.restorePageScrollTop;
+    if (typeof restoreTop === 'number' && Number.isFinite(restoreTop)) {
+      window.requestAnimationFrame(() => {
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.scrollTop = restoreTop;
+        }
+      });
+    }
+  }, [location.state]);
   
   const isNew = id === 'new';
   const playlistItem = isNew ? null : playlists[id || ''];
@@ -232,23 +270,6 @@ export function AlbumPage() {
       `/${size}x${size}bb.$1$2`
     );
   };
-  const trimBySentence = (text: string, maxLength: number): string => {
-    const normalized = text.replace(/\s+/g, ' ').trim();
-    if (!normalized) return '';
-    if (normalized.length <= maxLength) return normalized;
-    const sentences = normalized.split(/(?<=[.!?])\s+/).filter(Boolean);
-    let result = '';
-    for (const sentence of sentences) {
-      const candidate = result ? `${result} ${sentence}` : sentence;
-      if (candidate.length > maxLength) break;
-      result = candidate;
-    }
-    if (!result) {
-      const fallback = normalized.slice(0, Math.max(maxLength - 3, 1)).trimEnd();
-      return `${fallback}...`;
-    }
-    return `${result}...`;
-  };
 
   useEffect(() => {
     if (!itunesCollectionId) return;
@@ -300,52 +321,6 @@ export function AlbumPage() {
     }
 
     const controller = new AbortController();
-    const fetchWikiDescription = async (albumTitle: string, albumArtist: string): Promise<string> => {
-      try {
-        const queries = [
-          `"${albumTitle}" "${albumArtist}" album`,
-          `${albumTitle} ${albumArtist} album`,
-          `${albumTitle} album`,
-        ];
-        const candidateTitles: string[] = [];
-        for (const query of queries) {
-          const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&srlimit=5&format=json&origin=*`;
-          const searchResponse = await fetch(searchUrl, { signal: controller.signal });
-          if (!searchResponse.ok) continue;
-          const payload = await searchResponse.json() as { query?: { search?: Array<{ title?: string }> } };
-          for (const result of payload.query?.search || []) {
-            if (result.title && !candidateTitles.includes(result.title)) candidateTitles.push(result.title);
-          }
-        }
-
-        let bestDescription = '';
-        let bestScore = -1;
-        const normalizedTitle = albumTitle.toLowerCase();
-        const normalizedArtist = albumArtist.toLowerCase();
-        for (const candidateTitle of candidateTitles.slice(0, 10)) {
-          const summaryUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(candidateTitle)}`;
-          const summaryResponse = await fetch(summaryUrl, { signal: controller.signal });
-          if (!summaryResponse.ok) continue;
-          const payload = await summaryResponse.json() as { title?: string; description?: string; extract?: string };
-          const combined = `${payload.title || ''} ${payload.description || ''} ${payload.extract || ''}`.toLowerCase();
-          if (combined.includes('disambiguation') || combined.includes('may refer to')) continue;
-          const firstParagraph = (payload.extract || '').split('\n').map((part) => part.trim()).find(Boolean);
-          if (!firstParagraph) continue;
-          const score =
-            (combined.includes(normalizedTitle) ? 4 : 0) +
-            (combined.includes(normalizedArtist) ? 3 : 0) +
-            (combined.includes('album') || combined.includes('ep') ? 2 : 0);
-          if (score > bestScore) {
-            bestScore = score;
-            bestDescription = trimBySentence(firstParagraph, 320);
-          }
-        }
-        return bestDescription;
-      } catch {
-        return '';
-      }
-    };
-
     const loadItunesAlbum = async () => {
       setIsItunesLoading(true);
       setItunesError(null);
@@ -387,8 +362,8 @@ export function AlbumPage() {
           status: (collectionMeta?.collectionType || '').toLowerCase().includes('ep') ? 'EP' : 'Альбом',
         });
         setItunesTracks(normalizedTracks);
-        const wiki = await fetchWikiDescription(titleValue, artistValue);
-        setItunesDescription(wiki);
+        const wiki = await resolveAlbumDescriptionRu(titleValue, artistValue);
+        setItunesDescription(wiki.description);
       } catch (error) {
         if ((error as Error).name === 'AbortError') return;
         if (isItunesVirtual) {
@@ -614,6 +589,19 @@ export function AlbumPage() {
       coverUrl: coverId,
       ownerId: currentUserId || 'system',
     });
+    const liveArtists = useMockServer.getState().artists;
+    for (const artistName of splitArtistNames(track.artist)) {
+      const existingArtist = Object.values(liveArtists).find(
+        (artistItem) => artistItem.name.trim().toLowerCase() === artistName.trim().toLowerCase()
+      );
+      if (!existingArtist) continue;
+      await ensureArtistBannerFromTrackCover({
+        artist: existingArtist,
+        coverBlob: coverId ? await getImageFile(coverId) : null,
+        coverUrl: track.artworkUrl,
+        updateArtist: useMockServer.getState().updateArtist,
+      });
+    }
     return targetTrackId;
   };
   const addOnlineTrackToDraftPlaylist = async (track: OnlineTrackItemData) => {
@@ -858,8 +846,23 @@ export function AlbumPage() {
   };
 
   if (itunesCollectionId) {
+    const itunesFavoriteAlbumId = (
+      albums[`itunes-${itunesCollectionId}`]
+      || Object.values(albums).find((candidate) => candidate.itunesCollectionId === itunesCollectionId)
+    )?.id || null;
+    const isItunesFavorite = Boolean(
+      itunesFavoriteAlbumId && currentUser?.favoriteAlbumIds?.includes(itunesFavoriteAlbumId)
+    );
+    const toggleItunesFavorite = () => {
+      if (!currentUser || !itunesFavoriteAlbumId) return;
+      const currentFavorites = currentUser.favoriteAlbumIds || [];
+      const newFavorites = isItunesFavorite
+        ? currentFavorites.filter((albumId) => albumId !== itunesFavoriteAlbumId)
+        : [...currentFavorites, itunesFavoriteAlbumId];
+      updateUser(currentUser.id, { favoriteAlbumIds: newFavorites });
+    };
     return (
-      <div className="pb-10 h-full overflow-y-auto scrollbar-hide">
+      <div ref={scrollContainerRef} className="pb-10 h-full overflow-y-auto scrollbar-hide">
         <div
           className="relative pt-4 pb-8 px-4 text-white overflow-hidden"
           style={{ background: 'linear-gradient(to bottom, var(--accent-color) 0%, var(--accent-color) 52%, rgb(2 6 23) 100%)' }}
@@ -883,6 +886,15 @@ export function AlbumPage() {
               <h1 className="font-extrabold leading-tight break-words line-clamp-3 text-[clamp(1.5rem,4.8vw,3rem)]">
                 {itunesAlbumMeta?.artistName ? `${itunesAlbumMeta.artistName} - ` : ''}
                 {itunesAlbumMeta?.title || 'Загрузка альбома...'}
+                {itunesFavoriteAlbumId ? (
+                  <button
+                    onClick={toggleItunesFavorite}
+                    className="ml-2 inline-flex align-middle text-rose-400 hover:text-rose-500 transition-colors"
+                    aria-label="Добавить альбом в избранное"
+                  >
+                    <Heart className={`w-5 h-5 ${isItunesFavorite ? 'fill-rose-500 text-rose-500' : ''}`} />
+                  </button>
+                ) : null}
               </h1>
               <div className="text-sm text-white/80 mt-2">
                 {itunesTracks.length > 0 ? `${downloadedItunesTracksCount}/${itunesTracks.length} треков скачано` : 'Загружаем треки...'}
@@ -917,9 +929,19 @@ export function AlbumPage() {
                     isDownloaded={Boolean(localTrack)}
                     isDownloading={itunesDownloadLoadingId === track.id}
                     onDownload={() => downloadItunesAlbumTrack(track, { ensureAlbum: false })}
-                    onArtistClick={(artistName) => navigate(resolveArtistRoute(artistName, artists))}
+                    onArtistClick={(artistName) => {
+                      pushNavigationEntry({
+                        path: `${location.pathname}${location.search}`,
+                        state: getAlbumBackState(),
+                      });
+                      navigate(resolveArtistRoute(artistName, artists));
+                    }}
                     onOpenRecommendations={() => {
                       if (localTrack?.id) {
+                        pushNavigationEntry({
+                          path: `${location.pathname}${location.search}`,
+                          state: getAlbumBackState(),
+                        });
                         navigate(`/radooga?mode=track&seed=${encodeURIComponent(localTrack.id)}`);
                       }
                     }}
@@ -965,7 +987,7 @@ export function AlbumPage() {
   }
 
   return (
-    <div className="pb-10 h-full overflow-y-auto scrollbar-hide">
+    <div ref={scrollContainerRef} className="pb-10 h-full overflow-y-auto scrollbar-hide">
       <div
         className="relative pt-4 pb-8 px-4 text-white overflow-hidden"
         style={headerBackgroundStyle}
@@ -1015,7 +1037,13 @@ export function AlbumPage() {
               <h1 className="font-extrabold leading-tight break-words line-clamp-3 text-[clamp(1.5rem,4.8vw,3rem)]">
                 {album?.artistIds?.[0] && artists[album.artistIds[0]] ? (
                   <button
-                    onClick={() => navigate(`/artist/${album.artistIds[0]}`)}
+                    onClick={() => {
+                      pushNavigationEntry({
+                        path: `${location.pathname}${location.search}`,
+                        state: getAlbumBackState(),
+                      });
+                      navigate(`/artist/${album.artistIds[0]}`);
+                    }}
                     className="hover:underline underline-offset-4"
                   >
                     {artists[album.artistIds[0]].name}
@@ -1023,6 +1051,15 @@ export function AlbumPage() {
                 ) : null}
                 {album?.artistIds?.[0] && artists[album.artistIds[0]] ? ' - ' : ''}
                 {item?.title}
+                {!isNew && (
+                  <button
+                    onClick={toggleFavorite}
+                    className="ml-2 inline-flex align-middle text-rose-400 hover:text-rose-500 transition-colors"
+                    aria-label={isAlbum ? 'Добавить альбом в избранное' : 'Добавить плейлист в избранное'}
+                  >
+                    <Heart className={`w-5 h-5 ${isFavorite ? 'fill-rose-500 text-rose-500' : ''}`} />
+                  </button>
+                )}
               </h1>
               <div className="text-sm text-white/80 mt-2">
                 {itemTracks.length} треков · {formatTotalDuration(totalDurationSec)}
@@ -1205,9 +1242,19 @@ export function AlbumPage() {
                           isDownloading={Boolean(playlistAddLoadingIds[onlineTrack.id])}
                           isDownloaded={isAlreadyAdded}
                           onDownload={() => addOnlineTrackToDraftPlaylist(onlineTrack)}
-                          onArtistClick={(artistRef) => navigate(resolveArtistRoute(artistRef, artists))}
+                          onArtistClick={(artistRef) => {
+                            pushNavigationEntry({
+                              path: `${location.pathname}${location.search}`,
+                              state: getAlbumBackState(),
+                            });
+                            navigate(resolveArtistRoute(artistRef, artists));
+                          }}
                           onOpenRecommendations={() => {
                             if (localMatch?.id) {
+                              pushNavigationEntry({
+                                path: `${location.pathname}${location.search}`,
+                                state: getAlbumBackState(),
+                              });
                               navigate(`/radooga?mode=track&seed=${encodeURIComponent(localMatch.id)}`);
                             }
                           }}
@@ -1273,13 +1320,6 @@ export function AlbumPage() {
                 </button>
               )}
               <button
-                onClick={toggleFavorite}
-                className={`h-11 w-11 rounded-full text-white transition-colors ${isAlbum ? 'bg-white/15 border border-white/20 hover:bg-white/25' : 'bg-transparent border-transparent hover:bg-transparent'}`}
-                style={isFavorite ? { color: '#fda4af' } : undefined}
-              >
-                <Heart className={`w-5 h-5 mx-auto ${isFavorite ? 'fill-current' : ''}`} />
-              </button>
-              <button
                 onClick={() => setIsEditing(true)}
                 className={`h-11 w-11 rounded-full text-white transition-colors ${isAlbum ? 'bg-white/15 border border-white/20 hover:bg-white/25' : 'bg-transparent border-transparent hover:bg-transparent'}`}
               >
@@ -1317,18 +1357,30 @@ export function AlbumPage() {
                       fetch('http://127.0.0.1:7256/ingest/59c4ea1f-4267-4a06-ab6d-96fcc05a4b36',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'78e223'},body:JSON.stringify({sessionId:'78e223',runId:'album-click-debug',hypothesisId:'H1',location:'pages/AlbumPage.tsx:track-onPlay:after',message:'playTrack dispatched from album row',data:{albumId:item?.id ?? null,trackId:track.id},timestamp:Date.now()})}).catch(()=>{});
                       // #endregion
                     }}
-                    onArtistClick={(artistRef) => navigate(resolveArtistRoute(artistRef, artists))}
+                    onArtistClick={(artistRef) => {
+                      pushNavigationEntry({
+                        path: `${location.pathname}${location.search}`,
+                        state: getAlbumBackState(),
+                      });
+                      navigate(resolveArtistRoute(artistRef, artists));
+                    }}
                     onToggleFavorite={() => {
                       if (!currentUser) return;
                       const favoriteTrackIds = currentUser.favoriteTrackIds || [];
                       const nextFavorites = favoriteTrackIds.includes(track.id)
                         ? favoriteTrackIds.filter((id) => id !== track.id)
-                        : [...favoriteTrackIds, track.id];
+                        : [track.id, ...favoriteTrackIds];
                       updateUser(currentUser.id, { favoriteTrackIds: nextFavorites });
                     }}
                     onAddToPlaylist={() => {}}
                     onAddToAlbum={() => {}}
-                    onOpenRecommendations={() => navigate(`/radooga?mode=track&seed=${encodeURIComponent(track.id)}`)}
+                    onOpenRecommendations={() => {
+                      pushNavigationEntry({
+                        path: `${location.pathname}${location.search}`,
+                        state: getAlbumBackState(),
+                      });
+                      navigate(`/radooga?mode=track&seed=${encodeURIComponent(track.id)}`);
+                    }}
                     onEdit={() => {}}
                     showMenu={false}
                   />

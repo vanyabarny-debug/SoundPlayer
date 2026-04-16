@@ -30,6 +30,9 @@ import {
   resolveAlbumCollectionId,
   resolveAlbumTotalTracks,
 } from '../lib/albumCounters';
+import { pushNavigationEntry } from '../lib/navigationHistory';
+import { resolveArtistDescriptionRu } from '../lib/wikiDescriptions';
+import { ensureArtistBannerFromTrackCover } from '../lib/artistBannerCache';
 
 const Highlight = ({ text, highlight }: { text: string, highlight: string }) => {
   if (!highlight.trim() || !text) return <>{text}</>;
@@ -189,23 +192,6 @@ const sanitizeLyricsForUi = (lyrics: string): string =>
     .replace(/\[\d{1,2}:\d{2}(?:\.\d{1,2})?\]\s*/g, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
-
-const containsArtistKeywords = (value: string): boolean => {
-  const source = value.toLowerCase();
-  return ['singer', 'rapper', 'musician', 'band', 'artist', 'songwriter', 'record producer', 'dj', 'recording artist', 'composer']
-    .some((keyword) => source.includes(keyword));
-};
-
-const isMostlyLatin = (value: string): boolean => {
-  const letters = value.replace(/[^A-Za-z\u00C0-\u024F]/g, '');
-  if (!letters) return false;
-  return letters.length / Math.max(value.length, 1) > 0.45;
-};
-
-const isLikelyDisambiguation = (value: string): boolean => {
-  const text = value.toLowerCase();
-  return text.includes('disambiguation') || text.includes('may refer to');
-};
 
 const normalizeSearchText = (value: string): string =>
   value
@@ -468,7 +454,13 @@ export function BrowsePage() {
     matchesQuery(toStringArray(t.artistIds).join(' ')) ||
     matchesQuery(toStringArray(t.features).join(' '))
   );
-  const searchResultsPlaylists = allPlaylists.filter((playlist) => {
+  const favoriteArtistIds = new Set(user?.favoriteArtistIds || []);
+  const favoritePlaylistIds = new Set(user?.favoritePlaylistIds || []);
+  const favoriteAlbumIds = new Set(user?.favoriteAlbumIds || []);
+  const favoriteArtists = allArtistsWithTracks.filter((artist) => favoriteArtistIds.has(artist.id));
+  const favoritePlaylists = allPlaylists.filter((playlist) => favoritePlaylistIds.has(playlist.id));
+  const favoriteAlbums = allAlbums.filter((album) => favoriteAlbumIds.has(album.id));
+  const searchResultsPlaylists = favoritePlaylists.filter((playlist) => {
     const playlistTracksText = (playlist.trackIds || [])
       .map((trackId) => tracks[trackId])
       .filter(Boolean)
@@ -479,7 +471,7 @@ export function BrowsePage() {
       matchesQuery(playlistTracksText)
     );
   });
-  const searchResultsAlbums = allAlbums.filter((album) => {
+  const searchResultsAlbums = favoriteAlbums.filter((album) => {
     const albumTracksText = (album.trackIds || [])
       .map((trackId) => tracks[trackId])
       .filter(Boolean)
@@ -494,10 +486,6 @@ export function BrowsePage() {
   const searchResultsArtists = allArtistsWithTracks.filter((artist) =>
     matchesQuery(artist.name) || matchesQuery(artist.description || '')
   );
-  const favoriteArtistIds = new Set(user?.favoriteArtistIds || []);
-  const favoritePlaylistIds = new Set(user?.favoritePlaylistIds || []);
-  const favoriteArtists = allArtistsWithTracks.filter((artist) => favoriteArtistIds.has(artist.id));
-  const favoritePlaylists = allPlaylists.filter((playlist) => favoritePlaylistIds.has(playlist.id));
   const getArtistDownloadedTracks = (artistName: string) => {
     const normalizedArtist = artistName.trim().toLowerCase();
     return allTracks.filter((track) => {
@@ -533,7 +521,7 @@ export function BrowsePage() {
       };
     })
     .filter((row) => row.isVisible);
-  const allAlbumGroups = allAlbums.map((album) => {
+  const allAlbumGroups = favoriteAlbums.map((album) => {
     const downloadedTracksInAlbum = (album.trackIds || [])
       .map((trackId) => tracks[trackId])
       .filter(Boolean);
@@ -592,11 +580,11 @@ export function BrowsePage() {
   ];
   const visibleOverviewKeySet = new Set(visibleOverviewRefs.map(toOverviewItemKey));
   const orderedOverviewRefs = [
-    ...visibleOverviewRefs.filter((item) => !overviewOrder.includes(toOverviewItemKey(item))),
     ...overviewOrder.filter((key) => visibleOverviewKeySet.has(key)).map((key) => {
       const [type, ...idParts] = key.split(':');
       return { type: type as OverviewItemType, id: idParts.join(':') };
     }),
+    ...visibleOverviewRefs.filter((item) => !overviewOrder.includes(toOverviewItemKey(item))),
   ];
   const renderedOverviewRefs = isOverviewExpanded ? orderedOverviewRefs : orderedOverviewRefs.slice(0, 3);
   const getIsAlbumExpanded = (group: typeof visibleAlbumGroups[number]) => {
@@ -659,6 +647,13 @@ export function BrowsePage() {
     } catch {
       // ignore storage failures
     }
+    pushNavigationEntry({
+      path: `${location.pathname}${location.search}`,
+      state: {
+        fromBrowse: true,
+        browseReturnCtx: ctx,
+      },
+    });
     navigate(to, { state: { fromBrowse: true, browseReturnCtx: ctx } });
   };
   const randomSeedQueries = [
@@ -773,17 +768,23 @@ export function BrowsePage() {
   }, [overviewOrder]);
 
   useEffect(() => {
-    const fromLocation = (location.state as { restoreBrowseCtx?: { scrollTop?: number; searchQuery?: string; isOverviewExpanded?: boolean } } | null)?.restoreBrowseCtx;
-    let fallback: { scrollTop?: number; searchQuery?: string; isOverviewExpanded?: boolean } | null = null;
-    if (!fromLocation) {
-      try {
-        const raw = window.sessionStorage.getItem(BROWSE_RETURN_CTX_STORAGE_KEY);
-        if (raw) fallback = JSON.parse(raw);
-      } catch {
-        fallback = null;
-      }
+    const state = location.state as {
+      browseTabEntry?: boolean;
+      restoreBrowseCtx?: { scrollTop?: number; searchQuery?: string; isOverviewExpanded?: boolean };
+    } | null;
+
+    if (state?.browseTabEntry) {
+      setIsOverviewExpanded(false);
+      window.requestAnimationFrame(() => {
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.scrollTop = 0;
+        }
+      });
+      navigate(`${location.pathname}${location.search}`, { replace: true, state: {} });
+      return;
     }
-    const ctx = fromLocation || fallback;
+
+    const ctx = state?.restoreBrowseCtx;
     if (!ctx) return;
     if (typeof ctx.searchQuery === 'string') setSearchQuery(ctx.searchQuery);
     if (typeof ctx.isOverviewExpanded === 'boolean') setIsOverviewExpanded(ctx.isOverviewExpanded);
@@ -792,12 +793,15 @@ export function BrowsePage() {
         scrollContainerRef.current.scrollTop = ctx.scrollTop;
       }
     });
-  }, [location.key]);
+  }, [location.key, location.pathname, location.search, navigate]);
 
   useEffect(() => {
     let isMounted = true;
     const refreshRecommendations = async () => {
-      await openForYouFeed();
+      const existing = useRadoogaStore.getState().items || [];
+      if (existing.length === 0) {
+        await openForYouFeed();
+      }
       if (!isMounted) return;
       const recs = (useRadoogaStore.getState().items || []).slice(0, 8).map((item) => ({
         id: item.id,
@@ -1187,7 +1191,10 @@ export function BrowsePage() {
     return () => controller.abort();
   }, [albums, artists, updateAlbum]);
 
-  const downloadResult = async (result: NEMusicSearchResult) => {
+  const downloadResult = async (
+    result: NEMusicSearchResult,
+    options?: { autoplayAfterDownload?: boolean }
+  ) => {
     const downloadQuery = `${result.artist} - ${result.title}`;
 
     setDownloadLoadingId(result.id);
@@ -1245,72 +1252,11 @@ export function BrowsePage() {
         }
       }
 
-      const fetchArtistProfile = async (artistName: string): Promise<{ description: string; imageUrl?: string }> => {
-        try {
-          const searchQueries = [`"${artistName}" musician`, `"${artistName}" singer`, `${artistName} musician`, artistName];
-          const candidateTitles: string[] = [];
-
-          for (const term of searchQueries) {
-            const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(term)}&srlimit=6&format=json&origin=*`;
-            const searchResponse = await fetch(searchUrl);
-            if (!searchResponse.ok) continue;
-            const payload = (await searchResponse.json()) as { query?: { search?: Array<{ title?: string }> } };
-            for (const item of payload.query?.search || []) {
-              if (item.title && !candidateTitles.includes(item.title)) {
-                candidateTitles.push(item.title);
-              }
-            }
-          }
-
-          let bestMatch: { score: number; description: string; imageUrl?: string } | null = null;
-          const normalizedArtist = artistName.trim().toLowerCase();
-
-          for (const title of candidateTitles.slice(0, 12)) {
-            const summaryUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
-            const wikiResponse = await fetch(summaryUrl);
-            if (!wikiResponse.ok) continue;
-
-            const wikiPayload = await wikiResponse.json() as {
-              extract?: string;
-              description?: string;
-              thumbnail?: { source?: string };
-              originalimage?: { source?: string };
-              title?: string;
-            };
-
-            const combinedMeta = `${wikiPayload.title || ''} ${wikiPayload.description || ''} ${wikiPayload.extract || ''}`;
-            if (isLikelyDisambiguation(combinedMeta)) continue;
-
-            const firstParagraph = (wikiPayload.extract || '')
-              .split('\n')
-              .map((part) => part.trim())
-              .find(Boolean);
-            if (!firstParagraph) continue;
-
-            const pageTitle = (wikiPayload.title || title).toLowerCase();
-            const score =
-              (pageTitle === normalizedArtist ? 4 : 0) +
-              (pageTitle.startsWith(normalizedArtist) ? 2 : 0) +
-              (containsArtistKeywords(combinedMeta) ? 3 : 0) +
-              (isMostlyLatin(pageTitle) === isMostlyLatin(normalizedArtist) ? 1 : 0);
-
-            const imageUrl = wikiPayload.originalimage?.source || wikiPayload.thumbnail?.source;
-            if (!bestMatch || score > bestMatch.score) {
-              bestMatch = { score, description: firstParagraph.slice(0, 280), imageUrl };
-            }
-          }
-
-          if (bestMatch) {
-            return { description: bestMatch.description, imageUrl: bestMatch.imageUrl };
-          }
-        } catch {
-          // Continue to static fallback below.
-        }
-
-        return {
-          description: `${artistName} - артист в твоей коллекции rainboow. Скачан автоматически по метаданным трека.`,
-        };
-      };
+      const fetchArtistProfile = async (artistName: string): Promise<{ description: string; imageUrl?: string }> => (
+        resolveArtistDescriptionRu(artistName, {
+          fallbackDescription: `${artistName} - артист в твоей коллекции rainboow. Скачан автоматически по метаданным трека.`,
+        })
+      );
 
       for (const artistName of allArtistNames) {
         const exists = Object.values(useMockServer.getState().artists).some(
@@ -1349,10 +1295,12 @@ export function BrowsePage() {
           const existingArtist = Object.values(useMockServer.getState().artists).find(
             (artist) => artist.name.trim().toLowerCase() === artistName.toLowerCase()
           );
-          if (existingArtist && !existingArtist.bannerUrl) {
-            const bannerId = `artist-banner-${existingArtist.id}`;
-            await saveImageFile(bannerId, downloadedCoverBlob);
-            updateArtist(existingArtist.id, { bannerUrl: bannerId });
+          if (existingArtist) {
+            await ensureArtistBannerFromTrackCover({
+              artist: existingArtist,
+              coverBlob: downloadedCoverBlob,
+              updateArtist,
+            });
           }
         }
       }
@@ -1412,6 +1360,22 @@ export function BrowsePage() {
 
       setDownloadSuccessIds((prev) => ({ ...prev, [result.id]: true }));
       setDownloadedTrackIds((prev) => ({ ...prev, [result.id]: targetTrackId }));
+      setOverviewOrder((prev) => {
+        const trackKey = toOverviewItemKey({ type: 'track', id: targetTrackId });
+        return [trackKey, ...prev.filter((key) => key !== trackKey)];
+      });
+      if (user) {
+        const favoriteTrackIds = user.favoriteTrackIds || [];
+        const nextFavorites = [targetTrackId, ...favoriteTrackIds.filter((id) => id !== targetTrackId)];
+        updateUser(user.id, { favoriteTrackIds: nextFavorites });
+      }
+      if (options?.autoplayAfterDownload) {
+        const queue = Object.values(useMockServer.getState().tracks).map((track) => track.id);
+        const playbackQueue = queue.includes(targetTrackId)
+          ? queue
+          : [targetTrackId, ...queue];
+        playTrack(targetTrackId, playbackQueue, null);
+      }
     } catch (error) {
       setDownloadError((error as Error).message || 'Не удалось скачать трек. Попробуйте ещё раз.');
     } finally {
@@ -1743,7 +1707,10 @@ export function BrowsePage() {
         />
       </div>
       <div className="mb-4 flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Мои треки</h2>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500 flex items-center gap-2">
+          <span>Мои треки</span>
+          <span className="text-xs font-medium normal-case tracking-normal text-slate-400">{allTracks.length}</span>
+        </h2>
         {orderedOverviewRefs.length > 3 && (
           <button
             type="button"
@@ -1782,7 +1749,7 @@ export function BrowsePage() {
                             const favoriteTrackIds = user.favoriteTrackIds || [];
                             const newFavorites = favoriteTrackIds.includes(track.id)
                               ? favoriteTrackIds.filter((id) => id !== track.id)
-                              : [...favoriteTrackIds, track.id];
+                              : [track.id, ...favoriteTrackIds];
                             updateUser(user.id, { favoriteTrackIds: newFavorites });
                           }}
                           onAddToPlaylist={() => setAddingToPlaylistTrackId(track.id)}
@@ -1865,7 +1832,7 @@ export function BrowsePage() {
                                     const favoriteTrackIds = user.favoriteTrackIds || [];
                                     const newFavorites = favoriteTrackIds.includes(track.id)
                                       ? favoriteTrackIds.filter((id) => id !== track.id)
-                                      : [...favoriteTrackIds, track.id];
+                                      : [track.id, ...favoriteTrackIds];
                                     updateUser(user.id, { favoriteTrackIds: newFavorites });
                                   }}
                                   onAddToPlaylist={() => setAddingToPlaylistTrackId(track.id)}
@@ -1943,7 +1910,7 @@ export function BrowsePage() {
                                     const favoriteTrackIds = user.favoriteTrackIds || [];
                                     const newFavorites = favoriteTrackIds.includes(track.id)
                                       ? favoriteTrackIds.filter((id) => id !== track.id)
-                                      : [...favoriteTrackIds, track.id];
+                                      : [track.id, ...favoriteTrackIds];
                                     updateUser(user.id, { favoriteTrackIds: newFavorites });
                                   }}
                                   onAddToPlaylist={() => setAddingToPlaylistTrackId(track.id)}
@@ -1982,7 +1949,10 @@ export function BrowsePage() {
                 <div className="text-sm font-medium text-slate-500 mb-2">Рекомендации</div>
                 <div className="space-y-2">
                   {recommendedTracks.map((result) => {
-                    const downloadedTrack = tracks[result.id];
+                    const downloadedTrackId = downloadedTrackIds[result.id];
+                    const downloadedTrack = downloadedTrackId
+                      ? tracks[downloadedTrackId]
+                      : findStrictLocalTrackByResult(result);
                     const isDownloadedTrackActive = Boolean(downloadedTrack?.id && currentTrackId === downloadedTrack.id);
                     const isPreviewActive = !downloadedTrack?.id && currentPreviewKey === `browse-rec-${result.id}`;
                     return (
@@ -1991,6 +1961,11 @@ export function BrowsePage() {
                         track={result as OnlineTrackItemData}
                         isActive={isDownloadedTrackActive || isPreviewActive}
                         isPlaying={isPlaying}
+                        canDownload
+                        isDownloading={downloadLoadingId === result.id}
+                        isDownloaded={Boolean(downloadedTrack?.id)}
+                        emphasizeDownloaded
+                        onDownload={() => downloadResult(result, { autoplayAfterDownload: true })}
                         onArtistClick={(artistName) => navigateWithBrowseContext(resolveArtistRoute(artistName, artists))}
                         onPlay={() => {
                           if (downloadedTrack?.id) {
@@ -2043,6 +2018,7 @@ export function BrowsePage() {
                         canDownload
                         isDownloading={downloadLoadingId === result.id}
                         isDownloaded={Boolean(downloadedTrack?.id)}
+                        emphasizeDownloaded
                         onDownload={() => downloadResult(result)}
                         onArtistClick={(artistName) => navigateWithBrowseContext(resolveArtistRoute(artistName, artists))}
                         onPlay={() => {

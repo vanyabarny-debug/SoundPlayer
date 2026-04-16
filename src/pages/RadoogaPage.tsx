@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AnimatePresence, motion } from 'motion/react';
-import { ChevronRight, Heart, Loader2, Send, ThumbsDown } from 'lucide-react';
+import { ChevronRight, Heart, Loader2, Send, ThumbsDown, Volume2, VolumeX } from 'lucide-react';
 import { useRadoogaStore } from '../store/radoogaStore';
 import { usePlayerStore } from '../store/playerStore';
 import { useMockServer } from '../store/mockServer';
@@ -26,13 +26,18 @@ import {
   resolveLiveNews,
   resolveLyricsSnippet,
   getPexelsAmbientFallbackClips,
+  pickPexelsAmbientFallbackClips,
   markRecentPexelsClipsShown,
   resolvePexelsClips,
+  resolveRandomPexelsClips,
   resolveTrackVideo,
   resolveUpcomingConcerts,
 } from '../lib/radoogaContentSources';
 import { chunkLyricsForDisplay, resolveLyricsChunkByProgress } from '../lib/radoogaLyricsStyle';
 import type { RadoogaCandidate, SeedTrack } from '../lib/radoogaRecommendations';
+import { pushNavigationEntry } from '../lib/navigationHistory';
+import { resolveArtistDescriptionRu } from '../lib/wikiDescriptions';
+import { ensureArtistBannerFromTrackCover } from '../lib/artistBannerCache';
 
 const sanitizeFilename = (value: string): string =>
   value
@@ -118,12 +123,20 @@ const enrichCacheIsComplete = (track: RadoogaCandidate, cached: EnrichPayload): 
 export function RadoogaPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const navigateWithHistory = (to: string) => {
+    pushNavigationEntry({
+      path: `${window.location.pathname}${window.location.search}`,
+      state: { restorePageScrollTop: window.scrollY || 0 },
+    });
+    navigate(to);
+  };
   const modeParam = searchParams.get('mode');
   const seedParam = searchParams.get('seed');
 
   const [downloadInFlightIds, setDownloadInFlightIds] = useState<Record<string, true>>({});
   const [localError, setLocalError] = useState<string | null>(null);
   const [addingToPlaylistTrackId, setAddingToPlaylistTrackId] = useState<string | null>(null);
+  const [sendStatus, setSendStatus] = useState<'idle' | 'downloading' | 'opening' | 'added' | 'exists' | 'error'>('idle');
   const [lyricsSnippet, setLyricsSnippet] = useState<string | null>(null);
   const [factItem, setFactItem] = useState<RadoogaFactItem | null>(null);
   const [isFactExpanded, setIsFactExpanded] = useState(false);
@@ -149,10 +162,13 @@ export function RadoogaPage() {
   const touchStartYRef = useRef<number | null>(null);
   const wheelRefreshCooldownRef = useRef<number>(0);
   const navLockUntilRef = useRef<number>(0);
+  const mountedAtRef = useRef<number>(Date.now());
+  const didInitFeedRef = useRef(false);
   const prevCardIndexRef = useRef<number>(0);
   const enrichCacheRef = useRef<Record<string, EnrichPayload>>({});
   const enrichInflightRef = useRef<Record<string, Promise<EnrichPayload>>>({});
   const pexelsVideoRef = useRef<HTMLVideoElement | null>(null);
+  const lastShownPexelsUrlRef = useRef<string | null>(null);
   /** Направление смены карточки для анимации выхода/входа (как в short-form лентах). */
 
   const {
@@ -179,7 +195,7 @@ export function RadoogaPage() {
     refreshFeed,
   } = useRadoogaStore();
 
-  const { playPreview, currentTime, duration, currentPreviewKey, isPlaying } = usePlayerStore();
+  const { playPreview, currentTime, duration, currentPreviewKey, isPlaying, isMuted, toggleMute } = usePlayerStore();
   const { currentUserId } = useAuthStore();
   const { users, tracks, artists, addTrack, addArtist, updateUser } = useMockServer();
   const currentUser = currentUserId ? users[currentUserId] : null;
@@ -325,11 +341,18 @@ export function RadoogaPage() {
     fetch('http://127.0.0.1:7256/ingest/59c4ea1f-4267-4a06-ab6d-96fcc05a4b36',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'a82d9a'},body:JSON.stringify({sessionId:'a82d9a',runId:'run1',hypothesisId:'H3',location:'src/pages/RadoogaPage.tsx:229',message:'applyEnrichPayload payload sizes',data:{index:currentIndex,news:payload.news.length,photos:payload.photos.length,concerts:payload.concerts.length,hasVideo:Boolean(payload.video),hasLyrics:Boolean(payload.lyrics),errors:payload.resolverErrors.length},timestamp:Date.now()})}).catch(()=>{});
     // #endregion
     const picked = selectBestEnrichLayer(payload, currentIndex);
+    const finalLayer = activeItem?.cardSurface === 'pexels-popular' ? 'cover' : picked;
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
       console.log('applyEnrich picked layer:', picked, 'ambient clips:', (payload.pexelsClips ?? []).length);
     }
-    setActiveEnrichLayer(picked);
+    // #region agent log
+    fetch('http://127.0.0.1:7256/ingest/59c4ea1f-4267-4a06-ab6d-96fcc05a4b36',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d7795d'},body:JSON.stringify({sessionId:'d7795d',runId:'post-fix',hypothesisId:'H14',location:'src/pages/RadoogaPage.tsx:349',message:'final enrich layer after pexels guard',data:{trackId:activeItem?.id||null,cardSurface:activeItem?.cardSurface||null,pickedLayer:picked,finalLayer,clips:(payload.pexelsClips??[]).length},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    setActiveEnrichLayer(finalLayer);
+    // #region agent log
+    fetch('http://127.0.0.1:7256/ingest/59c4ea1f-4267-4a06-ab6d-96fcc05a4b36',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d7795d'},body:JSON.stringify({sessionId:'d7795d',runId:'run1',hypothesisId:'H5',location:'src/pages/RadoogaPage.tsx:347',message:'applyEnrichPayload clip selection context',data:{trackId:activeItem?.id||null,cardSurface:activeItem?.cardSurface||null,pickedLayer:picked,clips:(payload.pexelsClips??[]).length,firstClipId:payload.pexelsClips?.[0]?.id||null,firstClipUrl:payload.pexelsClips?.[0]?.videoUrl||null},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     if (
       activeItem?.cardSurface === 'pexels-popular'
       && (payload.pexelsClips?.length ?? 0) > 0
@@ -362,17 +385,18 @@ export function RadoogaPage() {
     ]);
     const factValue = facts.status === 'fulfilled' ? facts.value : null;
     const newsValue = news.status === 'fulfilled' ? news.value : [];
+    const sanitizedNews = newsValue.filter((newsItem) => {
+      const title = (newsItem.title || '').trim();
+      const summary = (newsItem.summary || '').trim();
+      if (!title && !summary) return false;
+      if (newsItem.placeholder) return false;
+      if (title === 'Резерв' || title.startsWith('Слот ·')) return false;
+      if (summary.includes('Пустая карточка. Смахните влево/вправо')) return false;
+      return true;
+    });
     const photosValue = photos.status === 'fulfilled' ? photos.value : [];
     const concertsValue = concerts.status === 'fulfilled' ? concerts.value : [];
-    const ensuredNews = newsValue.length > 0
-      ? newsValue
-      : [{
-        title: `Новости об артисте ${item.artist}`,
-        source: 'Fallback',
-        publishedAt: new Date().toISOString(),
-        url: `https://news.google.com/search?q=${encodeURIComponent(item.artist)}`,
-        placeholder: true,
-      }];
+    const ensuredNews = sanitizedNews;
     const ensuredPhotos = photosValue.length > 0
       ? photosValue
       : [{
@@ -392,13 +416,30 @@ export function RadoogaPage() {
     const lyricsValue = lyrics.status === 'fulfilled' ? lyrics.value : null;
     let pexelsClipsValue: RadoogaPexelsClip[] = [];
     try {
-      pexelsClipsValue = await resolvePexelsClips(item, { lyricsSnippet: lyricsValue });
+      pexelsClipsValue = item.cardSurface === 'pexels-popular'
+        ? await resolveRandomPexelsClips()
+        : await resolvePexelsClips(item, { lyricsSnippet: lyricsValue });
     } catch {
       pexelsClipsValue = [];
     }
+    // #region agent log
+    fetch('http://127.0.0.1:7256/ingest/59c4ea1f-4267-4a06-ab6d-96fcc05a4b36',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d7795d'},body:JSON.stringify({sessionId:'d7795d',runId:'run3',hypothesisId:'H13',location:'src/pages/RadoogaPage.tsx:413',message:'pexels strategy result',data:{trackId:item.id,cardSurface:item.cardSurface||null,clips:pexelsClipsValue.length,firstClipId:pexelsClipsValue[0]?.id||null,firstClipUrl:pexelsClipsValue[0]?.videoUrl||null},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     const hadPexelsFromApi = pexelsClipsValue.length > 0;
     if (item.cardSurface === 'pexels-popular' && !hadPexelsFromApi) {
-      pexelsClipsValue = getPexelsAmbientFallbackClips();
+      const fallbackPool = pickPexelsAmbientFallbackClips(6);
+      const rawFallback = getPexelsAmbientFallbackClips();
+      const start = fallbackPool.length > 0 ? hashString(item.id) % fallbackPool.length : 0;
+      const orderedFallback = fallbackPool.length > 0
+        ? [...fallbackPool.slice(start), ...fallbackPool.slice(0, start)]
+        : [];
+      pexelsClipsValue = orderedFallback.slice(0, Math.min(4, orderedFallback.length));
+      // #region agent log
+      fetch('http://127.0.0.1:7256/ingest/59c4ea1f-4267-4a06-ab6d-96fcc05a4b36',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d7795d'},body:JSON.stringify({sessionId:'d7795d',runId:'post-fix',hypothesisId:'H8',location:'src/pages/RadoogaPage.tsx:419',message:'fallback clips rotated by track id',data:{trackId:item.id,fallbackPool:fallbackPool.length,rawFallback:rawFallback.length,start,selected:pexelsClipsValue.length,firstClipId:pexelsClipsValue[0]?.id||null,firstClipUrl:pexelsClipsValue[0]?.videoUrl||null},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+      // #region agent log
+      fetch('http://127.0.0.1:7256/ingest/59c4ea1f-4267-4a06-ab6d-96fcc05a4b36',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d7795d'},body:JSON.stringify({sessionId:'d7795d',runId:'post-fix',hypothesisId:'H9',location:'src/pages/RadoogaPage.tsx:420',message:'fallback clips after recent-filter',data:{trackId:item.id,selectedIds:pexelsClipsValue.map((c)=>c.id),selectedUrls:pexelsClipsValue.map((c)=>c.videoUrl)},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
     }
     const resolverErrors: string[] = [];
     if (lyrics.status === 'rejected') resolverErrors.push('lyrics: не удалось загрузить лирику');
@@ -481,12 +522,23 @@ export function RadoogaPage() {
   };
 
   useEffect(() => {
+    if (didInitFeedRef.current) {
+      return;
+    }
+    didInitFeedRef.current = true;
     if (modeParam === 'track' && seedParam) {
       void openTrackFeed(seedParam);
       return;
     }
+    if (mode === 'for-you' && items.length > 0) {
+      return;
+    }
     void openForYouFeed();
-  }, [modeParam, openForYouFeed, openTrackFeed, seedParam]);
+  }, [mode, modeParam, items.length, currentIndex, openForYouFeed, openTrackFeed, seedParam]);
+  useEffect(() => {
+    mountedAtRef.current = Date.now();
+    navLockUntilRef.current = Date.now() + 900;
+  }, []);
 
   useEffect(() => {
     if (mode !== 'track-seed') return;
@@ -506,6 +558,13 @@ export function RadoogaPage() {
   useEffect(() => {
     setLikeAnimKey(0);
   }, [activeItem?.id]);
+
+  useEffect(() => {
+    if (!activeItem) return;
+    // #region agent log
+    fetch('http://127.0.0.1:7256/ingest/59c4ea1f-4267-4a06-ab6d-96fcc05a4b36',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d7795d'},body:JSON.stringify({sessionId:'d7795d',runId:'run2',hypothesisId:'H10',location:'src/pages/RadoogaPage.tsx:536',message:'active card surface on screen',data:{trackId:activeItem.id,cardSurface:activeItem.cardSurface||null,currentIndex},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+  }, [activeItem?.id, currentIndex]);
 
   useEffect(() => {
     setIsInlineWikiExpanded(false);
@@ -623,6 +682,7 @@ export function RadoogaPage() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (Date.now() - mountedAtRef.current < 900) return;
       if (isFactExpanded && event.key === 'Escape') {
         event.preventDefault();
         setIsFactExpanded(false);
@@ -646,6 +706,7 @@ export function RadoogaPage() {
   }, [currentIndex, isFactExpanded, nextCard, prevCard, refreshFeed]);
 
   const onWheel = async (event: React.WheelEvent<HTMLDivElement>) => {
+    if (Date.now() - mountedAtRef.current < 900) return;
     event.preventDefault();
     const now = Date.now();
     if (now < navLockUntilRef.current) return;
@@ -678,6 +739,7 @@ export function RadoogaPage() {
   };
 
   const onTouchEnd = async (event: React.TouchEvent<HTMLDivElement>) => {
+    if (Date.now() - mountedAtRef.current < 900) return;
     const now = Date.now();
     if (now < navLockUntilRef.current) return;
     const startY = touchStartYRef.current;
@@ -745,15 +807,37 @@ export function RadoogaPage() {
         ].map((n) => n.trim()).filter(Boolean))
       );
       for (const artistName of allArtistNames) {
-        const exists = Object.values(useMockServer.getState().artists).some(
+        const existingArtist = Object.values(useMockServer.getState().artists).find(
           (artist) => artist.name.trim().toLowerCase() === artistName.trim().toLowerCase()
         );
-        if (!exists) {
+        if (!existingArtist) {
+          const wikiProfile = await resolveArtistDescriptionRu(artistName, {
+            fallbackDescription: `${artistName} - артист из рекомендаций Radooga.`,
+          });
+          const artistId = `artist-${Date.now()}-${artistName.toLowerCase().replace(/\s+/g, '-')}`;
           addArtist({
-            id: `artist-${Date.now()}-${artistName.toLowerCase().replace(/\s+/g, '-')}`,
+            id: artistId,
             name: artistName,
-            description: `${artistName} - артист из рекомендаций Radooga.`,
+            description: wikiProfile.description,
             ownerId: currentUserId || undefined,
+          });
+          if (candidate.artworkUrl) {
+            await ensureArtistBannerFromTrackCover({
+              artist: {
+                id: artistId,
+                name: artistName,
+                description: wikiProfile.description,
+                ownerId: currentUserId || undefined,
+              },
+              coverUrl: candidate.artworkUrl,
+              updateArtist: useMockServer.getState().updateArtist,
+            });
+          }
+        } else if (candidate.artworkUrl) {
+          await ensureArtistBannerFromTrackCover({
+            artist: existingArtist,
+            coverUrl: candidate.artworkUrl,
+            updateArtist: useMockServer.getState().updateArtist,
           });
         }
       }
@@ -803,14 +887,16 @@ export function RadoogaPage() {
       const refreshedUser = authState.currentUserId ? refreshedState.users[authState.currentUserId] : null;
       if (refreshedUser) {
         const favoriteTrackIds = refreshedUser.favoriteTrackIds || [];
-        const nextFavorites = favoriteTrackIds.includes(finalTrackId)
-          ? favoriteTrackIds
-          : [...favoriteTrackIds, finalTrackId];
+        const nextFavorites = [
+          finalTrackId,
+          ...favoriteTrackIds.filter((trackId) => trackId !== finalTrackId),
+        ];
         refreshedState.updateUser(refreshedUser.id, { favoriteTrackIds: nextFavorites });
       }
       return finalTrackId;
     } catch (downloadError) {
       setLocalError((downloadError as Error).message || 'Не удалось обработать выбранный трек.');
+      setSendStatus('error');
       return null;
     } finally {
       setDownloadInFlightIds((prev) => {
@@ -837,14 +923,21 @@ export function RadoogaPage() {
   };
   const handleSendToPlaylist = async () => {
     if (!activeItem) return;
+    if (sendStatus === 'downloading' || sendStatus === 'opening') return;
     const existingTrackId = findLocalTrackIdByCandidate(activeItem);
     if (existingTrackId) {
+      setSendStatus('opening');
       setAddingToPlaylistTrackId(existingTrackId);
       return;
     }
+    setSendStatus('downloading');
     const downloadedId = await queueBackgroundDownload(activeItem);
     if (downloadedId) {
+      setSendStatus('opening');
       setAddingToPlaylistTrackId(downloadedId);
+    } else {
+      setSendStatus('error');
+      window.setTimeout(() => setSendStatus('idle'), 1400);
     }
   };
 
@@ -897,8 +990,28 @@ export function RadoogaPage() {
       setPexelsBgClipIndex(0);
       return;
     }
-    setPexelsBgClipIndex(hashString(activeItem.id) % pexelsClips.length);
+    const hashedIndex = hashString(activeItem.id) % pexelsClips.length;
+    let nextIndex = hashedIndex;
+    const lastShownUrl = lastShownPexelsUrlRef.current;
+    if (lastShownUrl && pexelsClips[nextIndex]?.videoUrl === lastShownUrl && pexelsClips.length > 1) {
+      const firstDifferent = pexelsClips.findIndex((clip) => clip.videoUrl !== lastShownUrl);
+      if (firstDifferent >= 0) nextIndex = firstDifferent;
+    }
+    // #region agent log
+    fetch('http://127.0.0.1:7256/ingest/59c4ea1f-4267-4a06-ab6d-96fcc05a4b36',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d7795d'},body:JSON.stringify({sessionId:'d7795d',runId:'post-fix',hypothesisId:'H11',location:'src/pages/RadoogaPage.tsx:948',message:'computed pexels initial index with dedupe',data:{trackId:activeItem.id,clips:pexelsClips.length,hashedIndex,nextIndex,lastShownUrl,clipId:pexelsClips[nextIndex]?.id||null,clipUrl:pexelsClips[nextIndex]?.videoUrl||null},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    // #region agent log
+    fetch('http://127.0.0.1:7256/ingest/59c4ea1f-4267-4a06-ab6d-96fcc05a4b36',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d7795d'},body:JSON.stringify({sessionId:'d7795d',runId:'run4',hypothesisId:'H15',location:'src/pages/RadoogaPage.tsx:951',message:'one video per card selected, rest queued',data:{trackId:activeItem.id,primaryClipIndex:nextIndex,primaryClipUrl:pexelsClips[nextIndex]?.videoUrl||null,queueSize:Math.max(0,pexelsClips.length-1)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    setPexelsBgClipIndex(nextIndex);
   }, [activeItem?.id, pexelsClips.length]);
+
+  useEffect(() => {
+    if (!isPexelsPopularSurface) return;
+    const currentUrl = pexelsClips[currentClipIndex]?.videoUrl || null;
+    if (!currentUrl) return;
+    lastShownPexelsUrlRef.current = currentUrl;
+  }, [isPexelsPopularSurface, currentClipIndex, pexelsClips[currentClipIndex]?.videoUrl]);
 
   useEffect(() => {
     // eslint-disable-next-line no-console
@@ -906,23 +1019,29 @@ export function RadoogaPage() {
   }, [isPopularType, hasClips, activeEnrichLayer]);
 
   useEffect(() => {
-    if (!isPopularType || isEnrichLoading || pexelsClips.length < 2) return;
-    const timer = window.setInterval(() => {
-      setPexelsBgClipIndex((prev) => (prev + 1) % pexelsClips.length);
-    }, 7200);
-    return () => window.clearInterval(timer);
-  }, [isPopularType, isEnrichLoading, pexelsClips.length]);
-
-  useEffect(() => {
     if (!isPexelsPopularSurface) return;
     const el = pexelsVideoRef.current;
     if (!el) return;
+    const onError = () => {
+      const failedUrl = pexelsClips[currentClipIndex]?.videoUrl || null;
+      // #region agent log
+      fetch('http://127.0.0.1:7256/ingest/59c4ea1f-4267-4a06-ab6d-96fcc05a4b36',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d7795d'},body:JSON.stringify({sessionId:'d7795d',runId:'post-fix',hypothesisId:'H12',location:'src/pages/RadoogaPage.tsx:978',message:'pexels video load error, switching clip',data:{trackId:activeItem?.id||null,currentClipIndex,failedUrl,clips:pexelsClips.length},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+      if (pexelsClips.length > 1) {
+        setPexelsBgClipIndex((prev) => (prev + 1) % pexelsClips.length);
+      }
+    };
+    // #region agent log
+    fetch('http://127.0.0.1:7256/ingest/59c4ea1f-4267-4a06-ab6d-96fcc05a4b36',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d7795d'},body:JSON.stringify({sessionId:'d7795d',runId:'run1',hypothesisId:'H7',location:'src/pages/RadoogaPage.tsx:959',message:'video element source before play',data:{trackId:activeItem?.id||null,currentClipIndex,videoSrc:pexelsClips[currentClipIndex]?.videoUrl||null,isPopularType,isPexelsPopularSurface},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     const run = () => {
       void el.play().catch(() => {});
     };
     run();
+    el.addEventListener('error', onError);
     el.addEventListener('loadeddata', run);
     return () => {
+      el.removeEventListener('error', onError);
       el.removeEventListener('loadeddata', run);
     };
   }, [isPexelsPopularSurface, currentClipIndex, pexelsClips[currentClipIndex]?.videoUrl]);
@@ -983,6 +1102,7 @@ export function RadoogaPage() {
     const list = listRadoogaPerformers(activeItem.artist, activeItem.title);
     return list.length > 0 ? list : [activeItem.artist].filter(Boolean);
   }, [activeItem?.id, activeItem?.artist, activeItem?.title]);
+  const hasMultiplePerformers = radoogaPerformers.length > 1;
 
   const uniqueConcertItems = useMemo(() => {
     const seen = new Set<string>();
@@ -1104,7 +1224,7 @@ export function RadoogaPage() {
                         key={pexelsClips[currentClipIndex]?.videoUrl ?? 'pexels-bg'}
                         className="absolute inset-0 h-full w-full object-cover"
                         src={pexelsClips[currentClipIndex]?.videoUrl}
-                        poster={currentItem?.artworkUrl ?? pexelsClips[currentClipIndex]?.thumb}
+                        poster={undefined}
                         muted={true}
                         playsInline={true}
                         loop={true}
@@ -1162,19 +1282,19 @@ export function RadoogaPage() {
               {!isEnrichLoading && activeEnrichLayer === 'concerts' && uniqueConcertItems.length > 0 && (
                 <div className="absolute inset-0 z-20 pointer-events-none pt-24 pb-56">
                   <div className="relative h-full w-full flex flex-col items-center justify-center overflow-y-auto px-5 pb-2 pt-2">
-                    <div className="pointer-events-none absolute inset-x-0 top-1/2 h-[44%] -translate-y-1/2 bg-gradient-to-b from-transparent via-black/60 to-transparent" />
+                    <div className="pointer-events-none absolute left-1/2 top-1/2 h-[204%] w-[300%] -translate-x-1/2 -translate-y-1/2 bg-gradient-to-b from-black/25 via-black/90 to-black/30" />
                     <motion.div
                       key={`concerts-block-${activeItem.id}`}
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.32, ease: 'easeOut' }}
-                      className="relative z-10 w-full max-w-[min(100%,26rem)] text-center"
+                      className="relative z-10 w-full max-w-[min(100%,26rem)] text-left"
                     >
                       <div className="text-[1.5rem] font-extrabold leading-tight text-white drop-shadow-[0_2px_14px_rgba(0,0,0,0.85)]">
                         {activeItem.artist}
                       </div>
                       <div className="mt-1 text-[1.02rem] font-semibold leading-snug text-white/92 drop-shadow-[0_1px_10px_rgba(0,0,0,0.75)]">
-                        У артиста пройдут концерты
+                        {hasMultiplePerformers ? 'У артистов пройдут концерты' : 'У артиста пройдут концерты'}
                       </div>
                       <div className="mt-3 max-h-[42vh] space-y-2.5 overflow-y-auto text-left">
                         {uniqueConcertItems.map((item, idx) => (
@@ -1183,7 +1303,7 @@ export function RadoogaPage() {
                               {formatConcertDate(item.date)}
                               {item.city ? ` · ${item.city}` : ''}
                               {item.venue ? ` · ${item.venue}` : ''}
-                              {` · ${item.date ? 'актуально' : 'ожидается'} · ${formatSourceHost(item.url)}`}
+                              {` · ${formatSourceHost(item.url)}`}
                             </div>
                             <div className="mt-1 text-[0.95rem] font-semibold leading-snug text-white drop-shadow-[0_1px_10px_rgba(0,0,0,0.75)]">
                               {item.title}
@@ -1250,7 +1370,7 @@ export function RadoogaPage() {
                         onWheel={(e) => e.stopPropagation()}
                       >
                         <p
-                          className={`text-[1.05rem] leading-relaxed text-white whitespace-pre-wrap drop-shadow-[0_2px_14px_rgba(0,0,0,0.85)] ${
+                          className={`text-[1.05rem] leading-relaxed text-white whitespace-pre-wrap [text-shadow:0_2px_6px_rgba(0,0,0,0.95),0_8px_24px_rgba(0,0,0,0.9),0_0_2px_rgba(0,0,0,1)] ${
                             isFactExpanded ? '' : 'line-clamp-[8]'
                           }`}
                         >
@@ -1284,7 +1404,7 @@ export function RadoogaPage() {
                           <button
                             type="button"
                             className="text-lg text-white/90 hover:text-white underline-offset-4 hover:underline whitespace-normal break-words text-left max-w-full"
-                            onClick={() => navigate(resolveArtistRoute(name, artists))}
+                            onClick={() => navigateWithHistory(resolveArtistRoute(name, artists))}
                           >
                             {name}
                           </button>
@@ -1329,70 +1449,92 @@ export function RadoogaPage() {
                   type="button"
                   onClick={() => setActiveCarouselIndex((prev) => (prev > 0 ? prev - 1 : prev))}
                   disabled={isLeftArrowDisabled}
-                  className="absolute left-4 top-1/2 -translate-y-[89px] h-12 w-12 text-white flex items-center justify-center disabled:opacity-35 drop-shadow-[0_10px_28px_rgba(0,0,0,0.95)] z-40"
+                  className="absolute left-4 top-[calc(50%-80px)] -translate-y-1/2 h-12 w-12 text-white flex items-center justify-center disabled:opacity-35 drop-shadow-[0_10px_28px_rgba(0,0,0,0.95)] z-40"
                   aria-label="Предыдущий элемент"
                 >
                   <ChevronRight className="w-7 h-7 rotate-180" />
                 </button>
               )}
-              <div className="absolute right-4 top-1/2 -translate-y-1/2 flex flex-col items-center gap-4 z-40">
-                {isCarouselLayerActive && (
+              {isCarouselLayerActive && (
+                <button
+                  type="button"
+                  onClick={() => setActiveCarouselIndex((prev) => (prev < activeCarouselCount - 1 ? prev + 1 : prev))}
+                  disabled={isRightArrowDisabled}
+                  className="absolute right-4 top-[calc(50%-80px)] -translate-y-1/2 h-12 w-12 text-white flex items-center justify-center disabled:opacity-35 drop-shadow-[0_10px_28px_rgba(0,0,0,0.95)] z-40"
+                  aria-label="Следующий элемент"
+                >
+                  <ChevronRight className="w-7 h-7" />
+                </button>
+              )}
+              <div className="absolute right-4 top-1/2 -translate-y-[40px] flex flex-col items-center gap-1.5 z-40">
+                  <motion.button
+                    type="button"
+                    onClick={() => void handleLike()}
+                    whileTap={{ scale: 0.86 }}
+                    className="h-12 w-12 text-white flex items-center justify-center drop-shadow-[0_10px_28px_rgba(0,0,0,0.95)] relative"
+                    aria-label="Лайкнуть и скачать"
+                  >
+                    <motion.span
+                      key={`${activeItem.id}-${likeAnimKey}`}
+                      className="inline-flex"
+                      initial={likeAnimKey === 0 ? false : { scale: 1, rotate: 0 }}
+                      animate={
+                        likeAnimKey === 0
+                          ? { scale: 1, rotate: 0 }
+                          : { scale: [1, 1.38, 0.96, 1], rotate: [0, -14, 12, 0] }
+                      }
+                      transition={{ duration: 0.52, ease: [0.22, 1, 0.36, 1] }}
+                    >
+                      <Heart className={`w-5 h-5 transition-colors ${isActiveTrackLiked ? 'fill-rose-500 text-rose-500' : ''}`} />
+                    </motion.span>
+                    {likeAnimKey > 0 ? (
+                      <motion.span
+                        className="pointer-events-none absolute inset-0 rounded-full border-2 border-rose-400/90"
+                        key={`ring-${activeItem.id}-${likeAnimKey}`}
+                        initial={{ scale: 0.6, opacity: 0.85 }}
+                        animate={{ scale: 2.1, opacity: 0 }}
+                        transition={{ duration: 0.55, ease: 'easeOut' }}
+                      />
+                    ) : null}
+                  </motion.button>
                   <button
                     type="button"
-                    onClick={() => setActiveCarouselIndex((prev) => (prev < activeCarouselCount - 1 ? prev + 1 : prev))}
-                    disabled={isRightArrowDisabled}
-                    className="h-12 w-12 text-white flex items-center justify-center disabled:opacity-35 drop-shadow-[0_10px_28px_rgba(0,0,0,0.95)]"
-                    aria-label="Следующий элемент"
+                    onClick={() => void handleDislikeArtist()}
+                    className="h-12 w-12 text-white flex items-center justify-center disabled:opacity-70 drop-shadow-[0_10px_28px_rgba(0,0,0,0.95)]"
+                    aria-label="Дизлайк артиста"
                   >
-                    <ChevronRight className="w-7 h-7" />
+                    <ThumbsDown className="w-5 h-5" />
                   </button>
-                )}
-                <motion.button
-                  type="button"
-                  onClick={() => void handleLike()}
-                  whileTap={{ scale: 0.86 }}
-                  className="h-12 w-12 text-white flex items-center justify-center drop-shadow-[0_10px_28px_rgba(0,0,0,0.95)] relative"
-                  aria-label="Лайкнуть и скачать"
-                >
-                  <motion.span
-                    key={`${activeItem.id}-${likeAnimKey}`}
-                    className="inline-flex"
-                    initial={likeAnimKey === 0 ? false : { scale: 1, rotate: 0 }}
-                    animate={
-                      likeAnimKey === 0
-                        ? { scale: 1, rotate: 0 }
-                        : { scale: [1, 1.38, 0.96, 1], rotate: [0, -14, 12, 0] }
-                    }
-                    transition={{ duration: 0.52, ease: [0.22, 1, 0.36, 1] }}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => void handleSendToPlaylist()}
+                      disabled={sendStatus === 'downloading' || sendStatus === 'opening'}
+                      className={`h-12 w-12 text-white flex items-center justify-center disabled:opacity-70 drop-shadow-[0_10px_28px_rgba(0,0,0,0.95)] ${
+                        sendStatus === 'downloading' || sendStatus === 'opening' ? 'text-violet-300' : ''
+                      }`}
+                      aria-label="Отправить трек в плейлист"
+                    >
+                      <Send className="w-5 h-5" />
+                    </button>
+                    {sendStatus !== 'idle' && (
+                      <div className="absolute right-[calc(100%+8px)] top-1/2 -translate-y-1/2 rounded-full px-3 py-1 text-[11px] bg-white/20 backdrop-blur text-white whitespace-nowrap">
+                        {sendStatus === 'downloading' && 'Скачиваем...'}
+                        {sendStatus === 'opening' && 'Открываем плейлисты'}
+                        {sendStatus === 'added' && 'Добавлено'}
+                        {sendStatus === 'exists' && 'Уже в плейлисте'}
+                        {sendStatus === 'error' && 'Ошибка'}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={toggleMute}
+                    className="h-12 w-12 text-white flex items-center justify-center drop-shadow-[0_10px_28px_rgba(0,0,0,0.95)]"
+                    aria-label={isMuted ? 'Включить звук' : 'Выключить звук'}
                   >
-                    <Heart className={`w-5 h-5 transition-colors ${isActiveTrackLiked ? 'fill-rose-500 text-rose-500' : ''}`} />
-                  </motion.span>
-                  {likeAnimKey > 0 ? (
-                    <motion.span
-                      className="pointer-events-none absolute inset-0 rounded-full border-2 border-rose-400/90"
-                      key={`ring-${activeItem.id}-${likeAnimKey}`}
-                      initial={{ scale: 0.6, opacity: 0.85 }}
-                      animate={{ scale: 2.1, opacity: 0 }}
-                      transition={{ duration: 0.55, ease: 'easeOut' }}
-                    />
-                  ) : null}
-                </motion.button>
-                <button
-                  type="button"
-                  onClick={() => void handleDislikeArtist()}
-                  className="h-12 w-12 text-white flex items-center justify-center disabled:opacity-70 drop-shadow-[0_10px_28px_rgba(0,0,0,0.95)]"
-                  aria-label="Дизлайк артиста"
-                >
-                  <ThumbsDown className="w-5 h-5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleSendToPlaylist()}
-                  className="h-12 w-12 text-white flex items-center justify-center disabled:opacity-70 drop-shadow-[0_10px_28px_rgba(0,0,0,0.95)]"
-                  aria-label="Отправить трек в плейлист"
-                >
-                  <Send className="w-5 h-5" />
-                </button>
+                    {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+                  </button>
               </div>
 
               {isPrefetching && (
@@ -1418,7 +1560,13 @@ export function RadoogaPage() {
       {addingToPlaylistTrackId && (
         <AddToPlaylistModal
           trackId={addingToPlaylistTrackId}
-          onClose={() => setAddingToPlaylistTrackId(null)}
+          onClose={() => {
+            setAddingToPlaylistTrackId(null);
+            window.setTimeout(() => setSendStatus('idle'), 900);
+          }}
+          onResult={(status) => {
+            setSendStatus(status === 'added' ? 'added' : 'exists');
+          }}
         />
       )}
     </>

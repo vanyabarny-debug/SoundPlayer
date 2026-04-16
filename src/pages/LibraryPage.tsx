@@ -190,7 +190,7 @@ export function LibraryPage() {
                         const favoriteTrackIds = user.favoriteTrackIds || [];
                         const newFavorites = favoriteTrackIds.includes(track.id)
                           ? favoriteTrackIds.filter(id => id !== track.id)
-                          : [...favoriteTrackIds, track.id];
+                          : [track.id, ...favoriteTrackIds];
                         updateUser(user.id, { favoriteTrackIds: newFavorites });
                       }
                     }}
@@ -325,7 +325,7 @@ export function LibraryPage() {
                   <Link key={artist.id} to={`/artist/${artist.id}`}>
                     <ArtistCard
                       artist={{ ...artist, name: artist.name }}
-                      subtitle={<Highlight text={artist.description?.trim() || 'Без описания'} highlight={searchQuery} />}
+                      subtitle={artist.description?.trim() ? <Highlight text={artist.description.trim()} highlight={searchQuery} /> : undefined}
                       isFavorite={Boolean(user?.favoriteArtistIds?.includes(artist.id))}
                       onToggleFavorite={user ? (e) => handleToggleFavoriteArtist(e, artist.id) : undefined}
                     />

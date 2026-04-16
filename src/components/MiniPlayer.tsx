@@ -7,13 +7,16 @@ import { CachedImage } from './CachedImage';
 import { AnimatePresence } from 'motion/react';
 import { getAverageColor } from '../lib/colorExtractor';
 import { getImageFile, saveAudioFile, saveImageFile } from '../lib/db';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { resolveArtistId } from '../lib/artistRouting';
 import { toStringArray } from '../lib/safe';
 import { useAuthStore } from '../store/authStore';
+import { ensureArtistBannerFromTrackCover } from '../lib/artistBannerCache';
+import { resolveArtistDescriptionRu } from '../lib/wikiDescriptions';
 
 export function MiniPlayer() {
   const navigate = useNavigate();
+  const location = useLocation();
   const {
     currentTrackId,
     currentAlbumId,
@@ -136,13 +139,33 @@ export function MiniPlayer() {
       let artistRef = normalizedArtist;
       if (existingArtist) {
         artistRef = existingArtist.id;
+        await ensureArtistBannerFromTrackCover({
+          artist: existingArtist,
+          coverBlob: coverId ? await getImageFile(coverId) : null,
+          coverUrl: previewArtworkUrl || undefined,
+          updateArtist: useMockServer.getState().updateArtist,
+        });
       } else {
+        const wikiProfile = await resolveArtistDescriptionRu(normalizedArtist, {
+          fallbackDescription: `${normalizedArtist} - imported from mini player preview.`,
+        });
         artistRef = `artist-${Date.now()}-${normalizedArtist.toLowerCase().replace(/\s+/g, '-')}`;
         addArtist({
           id: artistRef,
           name: normalizedArtist,
-          description: `${normalizedArtist} - imported from mini player preview.`,
+          description: wikiProfile.description,
           ownerId: currentUserId || undefined,
+        });
+        await ensureArtistBannerFromTrackCover({
+          artist: {
+            id: artistRef,
+            name: normalizedArtist,
+            description: wikiProfile.description,
+            ownerId: currentUserId || undefined,
+          },
+          coverBlob: coverId ? await getImageFile(coverId) : null,
+          coverUrl: previewArtworkUrl || undefined,
+          updateArtist: useMockServer.getState().updateArtist,
         });
       }
 
@@ -160,9 +183,9 @@ export function MiniPlayer() {
 
       const user = currentUserId ? users[currentUserId] : null;
       if (user) {
-        const nextFavorites = user.favoriteTrackIds.includes(trackId)
+               const nextFavorites = user.favoriteTrackIds.includes(trackId)
           ? user.favoriteTrackIds
-          : [...user.favoriteTrackIds, trackId];
+          : [trackId, ...user.favoriteTrackIds];
         updateUser(user.id, { favoriteTrackIds: nextFavorites });
       }
       playTrack(trackId, [trackId], null);
@@ -214,6 +237,12 @@ export function MiniPlayer() {
   }, [isFullPlayerOpen, track?.id]);
 
   useEffect(() => {
+    // #region agent log
+    fetch('http://127.0.0.1:7256/ingest/59c4ea1f-4267-4a06-ab6d-96fcc05a4b36',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'bf06a6'},body:JSON.stringify({sessionId:'bf06a6',runId:'run3',hypothesisId:'H10',location:'src/components/MiniPlayer.tsx:240',message:'mini route snapshot',data:{path:`${location.pathname}${location.search}`,isFullPlayerOpen,trackId:track?.id||null},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+  }, [location.pathname, location.search, isFullPlayerOpen, track?.id]);
+
+  useEffect(() => {
   }, [currentTrackId, currentAlbumId, track?.id, currentTime, duration, isAlbumContext]);
 
   if (!track && !isPreviewContext) {
@@ -231,6 +260,9 @@ export function MiniPlayer() {
             return;
           }
           if (isPreviewContext) return;
+          // #region agent log
+          fetch('http://127.0.0.1:7256/ingest/59c4ea1f-4267-4a06-ab6d-96fcc05a4b36',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'bf06a6'},body:JSON.stringify({sessionId:'bf06a6',runId:'run1',hypothesisId:'H3',location:'src/components/MiniPlayer.tsx:258',message:'opening fullplayer from mini',data:{fromPath:`${location.pathname}${location.search}`,trackId:track?.id||null,isAlbumContext,isPreviewContext},timestamp:Date.now()})}).catch(()=>{});
+          // #endregion
           setIsFullPlayerOpen(true);
         }}
       >
@@ -345,7 +377,12 @@ export function MiniPlayer() {
 
       <AnimatePresence mode="wait">
         {isFullPlayerOpen && track && (
-          <FullPlayer onClose={() => setIsFullPlayerOpen(false)} track={track} />
+          <FullPlayer onClose={() => {
+            // #region agent log
+            fetch('http://127.0.0.1:7256/ingest/59c4ea1f-4267-4a06-ab6d-96fcc05a4b36',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'bf06a6'},body:JSON.stringify({sessionId:'bf06a6',runId:'run1',hypothesisId:'H4',location:'src/components/MiniPlayer.tsx:372',message:'fullplayer onClose invoked',data:{currentPath:`${location.pathname}${location.search}`,trackId:track.id},timestamp:Date.now()})}).catch(()=>{});
+            // #endregion
+            setIsFullPlayerOpen(false);
+          }} track={track} />
         )}
       </AnimatePresence>
     </>

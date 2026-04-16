@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { LogOut, Edit2, Plus, Heart, X } from 'lucide-react';
 import { ArtistCard } from '../components/ArtistCard';
 import { CollectionCard } from '../components/CollectionCard';
+import { pushNavigationEntry } from '../lib/navigationHistory';
 
 export function ProfilePage() {
   const { currentUserId, logout } = useAuthStore();
@@ -32,6 +33,13 @@ export function ProfilePage() {
     updateUser(user.id, { avatarEmoji: emoji, avatarGradient: gradient });
     setIsEditing(false);
   };
+  const navigateWithHistory = (to: string) => {
+    pushNavigationEntry({
+      path: '/profile',
+      state: { restorePageScrollTop: window.scrollY || 0 },
+    });
+    navigate(to);
+  };
 
   const gradients = [
     'linear-gradient(135deg, #f6d365 0%, #fda085 100%)',
@@ -46,6 +54,20 @@ export function ProfilePage() {
   const allArtists = Object.values(artists);
   const allAlbums = Object.values(albums);
   const allPlaylists = Object.values(playlists);
+  const profileVisiblePlaylists = allPlaylists.filter((playlist) => {
+    const downloadedTracksCount = (playlist.trackIds || [])
+      .map((trackId) => tracks[trackId])
+      .filter(Boolean)
+      .length;
+    return downloadedTracksCount > 1;
+  });
+  const profileVisibleAlbums = allAlbums.filter((album) => {
+    const downloadedTracksCount = (album.trackIds || [])
+      .map((trackId) => tracks[trackId])
+      .filter(Boolean)
+      .length;
+    return downloadedTracksCount > 1;
+  });
   const getCollapsedRingStyle = (index: number) => {
     const ringPhase = ((index % 7) + 7) % 7;
     const scaleMap = [0.9, 0.96, 1.02, 1.08, 1.02, 0.96, 0.9];
@@ -192,11 +214,8 @@ export function ProfilePage() {
 
   return (
     <div className="p-4 pt-8 h-full overflow-y-auto scrollbar-hide">
-      <div className="flex items-center justify-between mb-8">
+      <div className="mb-8">
         <h1 className="text-3xl font-bold">Профиль</h1>
-        <button onClick={logout} className="p-2 text-slate-400 hover:text-violet-500">
-          <LogOut className="w-6 h-6" />
-        </button>
       </div>
 
       <div className="flex flex-col items-center mb-8">
@@ -284,7 +303,7 @@ export function ProfilePage() {
                   <ArtistCard
                     artist={{ ...artist, name: artist.name }}
                     hideSubtitle
-                    onClick={() => navigate(`/artist/${artist.id}`)}
+                    onClick={() => navigateWithHistory(`/artist/${artist.id}`)}
                     isFavorite={Boolean(user.favoriteArtistIds?.includes(artist.id))}
                     onToggleFavorite={(e) => {
                       e.stopPropagation();
@@ -325,7 +344,7 @@ export function ProfilePage() {
                   className="w-full text-left px-3 py-2 rounded-xl text-sm hover:bg-violet-50"
                   onClick={() => {
                     setIsCreateChooserOpen(false);
-                    navigate('/playlist/new?type=playlist');
+                    navigateWithHistory('/playlist/new?type=playlist');
                   }}
                 >
                   Создать плейлист
@@ -335,7 +354,7 @@ export function ProfilePage() {
                   className="w-full text-left px-3 py-2 rounded-xl text-sm hover:bg-violet-50"
                   onClick={() => {
                     setIsCreateChooserOpen(false);
-                    navigate('/playlist/new?type=album');
+                    navigateWithHistory('/playlist/new?type=album');
                   }}
                 >
                   Создать альбом
@@ -343,15 +362,15 @@ export function ProfilePage() {
               </div>
             )}
           </div>
-          {(allPlaylists.length > 0 || allAlbums.length > 0) && (
+          {(profileVisiblePlaylists.length > 0 || profileVisibleAlbums.length > 0) && (
             <div
               className="-mx-6 px-6 py-10 overflow-x-auto overflow-y-visible"
               onScroll={(e) => setCollectionsScrollLeft(e.currentTarget.scrollLeft)}
             >
               <div className="flex items-center overflow-visible min-h-[220px]">
               {[
-                ...allPlaylists.map((playlist) => ({ type: 'playlist' as const, id: playlist.id })),
-                ...allAlbums.map((album) => ({ type: 'album' as const, id: album.id })),
+                ...profileVisiblePlaylists.map((playlist) => ({ type: 'playlist' as const, id: playlist.id })),
+                ...profileVisibleAlbums.map((album) => ({ type: 'album' as const, id: album.id })),
               ]
                 .map((item, index) => {
                   const ringStyle = getInteractiveRingStyle(index, hoveredCollectionIndex, collectionsScrollLeft);
@@ -370,7 +389,7 @@ export function ProfilePage() {
                         }}
                         onMouseEnter={() => setCollectionHoverWithDelay(index)}
                         onMouseLeave={() => setCollectionHoverWithDelay(null)}
-                        onClick={() => navigate(`/playlist/${playlist.id}`)}
+                        onClick={() => navigateWithHistory(`/playlist/${playlist.id}`)}
                       >
                         <CollectionCard
                           title={playlist.title}
@@ -417,7 +436,7 @@ export function ProfilePage() {
                       }}
                       onMouseEnter={() => setCollectionHoverWithDelay(index)}
                       onMouseLeave={() => setCollectionHoverWithDelay(null)}
-                      onClick={() => navigate(
+                      onClick={() => navigateWithHistory(
                         album.itunesCollectionId
                           ? `/album/itunes-${album.itunesCollectionId}`
                           : (/^itunes-album-(\d+)$/.test(album.id)
@@ -459,7 +478,7 @@ export function ProfilePage() {
               </div>
             </div>
           )}
-          {allPlaylists.length === 0 && allAlbums.length === 0 && (
+          {profileVisiblePlaylists.length === 0 && profileVisibleAlbums.length === 0 && (
             <div className="text-center text-zinc-500 py-8">Нет плейлистов и альбомов.</div>
           )}
         </div>
@@ -473,9 +492,9 @@ export function ProfilePage() {
                   key={`profile-liked-${track.id}`}
                   role="button"
                   tabIndex={0}
-                  onClick={() => navigate('/browse')}
+                  onClick={() => navigateWithHistory('/browse')}
                   onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') navigate('/browse');
+                    if (event.key === 'Enter' || event.key === ' ') navigateWithHistory('/browse');
                   }}
                   className="text-left rounded-2xl border border-violet-100 bg-white/85 p-3 hover:bg-white transition-colors relative"
                 >
@@ -509,10 +528,10 @@ export function ProfilePage() {
                   key={`profile-disliked-artist-${artistName}`}
                   role="button"
                   tabIndex={0}
-                  onClick={() => navigate(`/artist/itunes-${encodeURIComponent(artistName)}?source=itunes&name=${encodeURIComponent(artistName)}`)}
+                  onClick={() => navigateWithHistory(`/artist/itunes-${encodeURIComponent(artistName)}?source=itunes&name=${encodeURIComponent(artistName)}`)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' || event.key === ' ') {
-                      navigate(`/artist/itunes-${encodeURIComponent(artistName)}?source=itunes&name=${encodeURIComponent(artistName)}`);
+                      navigateWithHistory(`/artist/itunes-${encodeURIComponent(artistName)}?source=itunes&name=${encodeURIComponent(artistName)}`);
                     }
                   }}
                   className="text-left rounded-2xl border border-rose-200 bg-rose-50/70 p-3 hover:bg-rose-50 transition-colors relative"
@@ -537,6 +556,17 @@ export function ProfilePage() {
             <div className="text-sm text-zinc-500">Пока нет дизлайков.</div>
           )}
         </div>
+      </div>
+
+      <div className="mt-12 mb-8 flex justify-center border-t border-violet-100/80 pt-8">
+        <button
+          type="button"
+          onClick={logout}
+          className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white/90 px-5 py-3 text-sm font-medium text-slate-600 hover:border-rose-200 hover:bg-rose-50/80 hover:text-rose-600 transition-colors"
+        >
+          <LogOut className="w-5 h-5" />
+          Выйти
+        </button>
       </div>
     </div>
   );

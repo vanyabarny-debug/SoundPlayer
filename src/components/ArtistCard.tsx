@@ -2,6 +2,7 @@ import { Heart, Play, User } from 'lucide-react';
 import { Artist } from '../store/mockServer';
 import { CachedImage } from './CachedImage';
 import React from 'react';
+import { isPlaceholderArtistDescription } from '../lib/wikiDescriptions';
 
 interface ArtistCardProps {
   artist: Artist;
@@ -13,6 +14,9 @@ interface ArtistCardProps {
 }
 
 export function ArtistCard({ artist, subtitle, hideSubtitle = false, onClick, isFavorite, onToggleFavorite }: ArtistCardProps) {
+  const resolvedSubtitle = subtitle ?? (
+    isPlaceholderArtistDescription(artist.description) ? '' : artist.description?.trim()
+  );
   return (
     <div className="group relative" onClick={onClick}>
       <div className="bg-white rounded-[4px] overflow-hidden transition-colors cursor-pointer">
@@ -50,9 +54,7 @@ export function ArtistCard({ artist, subtitle, hideSubtitle = false, onClick, is
               </button>
             )}
           </div>
-          {!hideSubtitle && (
-            <div className="text-xs text-slate-400 mt-1 line-clamp-2">{subtitle ?? (artist.description?.trim() || 'Без описания')}</div>
-          )}
+          {!hideSubtitle && resolvedSubtitle ? <div className="text-xs text-slate-400 mt-1 line-clamp-2">{resolvedSubtitle}</div> : null}
         </div>
       </div>
     </div>

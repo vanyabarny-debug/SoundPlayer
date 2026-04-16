@@ -4,13 +4,70 @@ import { getAudioFile } from '../lib/db';
 
 export function AudioPlayer() {
   const audioRef = useRef<HTMLAudioElement>(null);
-  const { currentTrackId, previewUrl, isPlaying, volume, isMuted, repeatMode, setTime, setDuration, nextTrack, setLoading, seekRequest, clearSeekRequest, updateAudioMetrics } = usePlayerStore();
+  const {
+    currentTrackId,
+    previewUrl,
+    isPlaying,
+    volume,
+    isMuted,
+    repeatMode,
+    audioOutputDeviceId,
+    setTime,
+    setDuration,
+    nextTrack,
+    setLoading,
+    seekRequest,
+    clearSeekRequest,
+    updateAudioMetrics,
+    setAudioOutputDevices,
+    setAudioOutputSwitchSupported,
+  } = usePlayerStore();
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const analyserContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const rafRef = useRef<number | null>(null);
   const lastMetricsTsRef = useRef(0);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    const mediaAudio = audio as (HTMLAudioElement & { setSinkId?: (deviceId: string) => Promise<void> }) | null;
+    const canSwitchOutput = Boolean(mediaAudio?.setSinkId);
+    setAudioOutputSwitchSupported(canSwitchOutput);
+    if (!navigator.mediaDevices?.enumerateDevices) {
+      setAudioOutputDevices([]);
+      return;
+    }
+
+    const syncOutputs = async () => {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const outputs = devices
+          .filter((device) => device.kind === 'audiooutput')
+          .map((device, index) => ({
+            deviceId: device.deviceId || `output-${index}`,
+            label: device.label || `Выход ${index + 1}`,
+          }));
+        setAudioOutputDevices(outputs);
+      } catch {
+        setAudioOutputDevices([]);
+      }
+    };
+
+    void syncOutputs();
+    navigator.mediaDevices.addEventListener?.('devicechange', syncOutputs);
+    return () => {
+      navigator.mediaDevices.removeEventListener?.('devicechange', syncOutputs);
+    };
+  }, [setAudioOutputDevices, setAudioOutputSwitchSupported]);
+
+  useEffect(() => {
+    const audio = audioRef.current as (HTMLAudioElement & { setSinkId?: (deviceId: string) => Promise<void> }) | null;
+    if (!audio?.setSinkId || !audioOutputDeviceId) return;
+    audio.setSinkId(audioOutputDeviceId).catch((error) => {
+      console.error('Failed to switch audio output device', error);
+    });
+  }, [audioOutputDeviceId]);
 
   useEffect(() => {
     let objectUrl: string | null = null;

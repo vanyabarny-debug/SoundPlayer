@@ -25,6 +25,9 @@ import {
   resolveAlbumCollectionId,
   resolveAlbumTotalTracks,
 } from '../lib/albumCounters';
+import { popNavigationEntry, pushNavigationEntry } from '../lib/navigationHistory';
+import { isPlaceholderArtistDescription, resolveArtistDescriptionRu } from '../lib/wikiDescriptions';
+import { ensureArtistBannerFromTrackCover } from '../lib/artistBannerCache';
 
 export function ArtistPage() {
   const { id } = useParams<{ id: string }>();
@@ -37,7 +40,22 @@ export function ArtistPage() {
   const { artists, updateArtist, addArtist, tracks, albums, users, updateUser, addTrack, updateTrack, updateAlbum } = useMockServer();
   const { playTrack, playPreview, currentTrackId, currentPreviewKey, isPlaying } = usePlayerStore();
   const { currentUserId } = useAuthStore();
+  const getArtistBackState = () => {
+    const state = (location.state || {}) as Record<string, unknown>;
+    return {
+      ...(state.fromBrowse ? { fromBrowse: true, browseReturnCtx: state.browseReturnCtx } : {}),
+      restorePageScrollTop: window.scrollY || 0,
+    };
+  };
   const handleBack = () => {
+    const stacked = popNavigationEntry(`${location.pathname}${location.search}`);
+    if (stacked) {
+      // #region agent log
+      fetch('http://127.0.0.1:7256/ingest/59c4ea1f-4267-4a06-ab6d-96fcc05a4b36',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'bf06a6'},body:JSON.stringify({sessionId:'bf06a6',runId:'run2',hypothesisId:'H7',location:'src/pages/ArtistPage.tsx:53',message:'artist handleBack uses stacked path',data:{currentPath:`${location.pathname}${location.search}`,targetPath:stacked.path,hasState:Boolean(stacked.state)},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+      navigate(stacked.path, { replace: true, state: stacked.state });
+      return;
+    }
     const state = location.state as { fromBrowse?: boolean; browseReturnCtx?: unknown } | null;
     const stateCtx = state?.fromBrowse ? state.browseReturnCtx : null;
     let fallbackCtx: unknown = null;
@@ -51,9 +69,15 @@ export function ArtistPage() {
     }
     const restoreBrowseCtx = stateCtx || (state?.fromBrowse ? fallbackCtx : null);
     if (restoreBrowseCtx) {
+      // #region agent log
+      fetch('http://127.0.0.1:7256/ingest/59c4ea1f-4267-4a06-ab6d-96fcc05a4b36',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'bf06a6'},body:JSON.stringify({sessionId:'bf06a6',runId:'run2',hypothesisId:'H7',location:'src/pages/ArtistPage.tsx:69',message:'artist handleBack uses browse context',data:{currentPath:`${location.pathname}${location.search}`},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       navigate('/browse', { state: { restoreBrowseCtx } });
       return;
     }
+    // #region agent log
+    fetch('http://127.0.0.1:7256/ingest/59c4ea1f-4267-4a06-ab6d-96fcc05a4b36',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'bf06a6'},body:JSON.stringify({sessionId:'bf06a6',runId:'run2',hypothesisId:'H7',location:'src/pages/ArtistPage.tsx:73',message:'artist handleBack uses navigate -1',data:{currentPath:`${location.pathname}${location.search}`},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     navigate(-1);
   };
   
@@ -115,6 +139,14 @@ export function ArtistPage() {
 
   useEffect(() => {
   }, [id, isNew]);
+  useEffect(() => {
+    const restoreTop = (location.state as { restorePageScrollTop?: number } | null)?.restorePageScrollTop;
+    if (typeof restoreTop === 'number' && Number.isFinite(restoreTop)) {
+      window.requestAnimationFrame(() => {
+        window.scrollTo({ top: restoreTop });
+      });
+    }
+  }, [location.state]);
 
   const displayArtistName = (isVirtualArtist ? virtualArtistName : artist?.name) || '';
   const favoriteArtistId =
@@ -143,9 +175,10 @@ export function ArtistPage() {
       : [...currentFavorites, targetArtistId];
     updateUser(currentUser.id, { favoriteArtistIds: newFavorites });
   };
+  const shouldIgnoreStoredDescription = !isVirtualArtist && isPlaceholderArtistDescription(artist?.description);
   const displayArtistDescription = isVirtualArtist
     ? (virtualArtistDescription || onlineArtistDescription)
-    : (artist?.description || onlineArtistDescription || '');
+    : ((shouldIgnoreStoredDescription ? '' : artist?.description) || onlineArtistDescription || '');
   const displayBannerPreview = isVirtualArtist
     ? (virtualArtistBanner || onlineArtistBanner)
     : (bannerPreview || onlineArtistBanner);
@@ -194,46 +227,9 @@ export function ArtistPage() {
           }
         }
 
-        const wikiQueries = [`"${fallbackName}" musician`, `"${fallbackName}" singer`, `${fallbackName} musician`, fallbackName];
-        const candidateTitles: string[] = [];
-        for (const term of wikiQueries) {
-          const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(term)}&srlimit=6&format=json&origin=*`;
-          const searchResponse = await fetch(searchUrl, { signal: controller.signal });
-          if (!searchResponse.ok) continue;
-          const payload = await searchResponse.json() as { query?: { search?: Array<{ title?: string }> } };
-          for (const result of payload.query?.search || []) {
-            if (result.title && !candidateTitles.includes(result.title)) candidateTitles.push(result.title);
-          }
-        }
-        let description = '';
-        let imageUrl = '';
-        let bestScore = -1;
-        for (const title of candidateTitles.slice(0, 10)) {
-          const summaryUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
-          const wikiResponse = await fetch(summaryUrl, { signal: controller.signal });
-          if (!wikiResponse.ok) continue;
-          const payload = await wikiResponse.json() as {
-            title?: string;
-            description?: string;
-            extract?: string;
-            thumbnail?: { source?: string };
-            originalimage?: { source?: string };
-          };
-          const combined = `${payload.title || ''} ${payload.description || ''} ${payload.extract || ''}`.toLowerCase();
-          if (combined.includes('disambiguation') || combined.includes('may refer to')) continue;
-          const firstParagraph = (payload.extract || '').split('\n').map((part) => part.trim()).find(Boolean);
-          if (!firstParagraph) continue;
-          const score =
-            (combined.includes(normalizeArtistName(fallbackName)) ? 3 : 0) +
-            (combined.includes('musician') || combined.includes('artist') || combined.includes('singer') ? 2 : 0);
-          if (score > bestScore) {
-            bestScore = score;
-            description = trimBySentence(firstParagraph, 280);
-            imageUrl = payload.originalimage?.source || payload.thumbnail?.source || '';
-          }
-        }
-        if (description) setVirtualArtistDescription(description);
-        if (!virtualArtistBanner && imageUrl) setVirtualArtistBanner(imageUrl);
+        const wikiProfile = await resolveArtistDescriptionRu(fallbackName);
+        if (wikiProfile.description) setVirtualArtistDescription(wikiProfile.description);
+        if (!virtualArtistBanner && wikiProfile.imageUrl) setVirtualArtistBanner(wikiProfile.imageUrl);
       } catch (error) {
         if ((error as Error).name === 'AbortError') return;
         setVirtualArtistError('Не удалось загрузить данные артиста.');
@@ -274,53 +270,19 @@ export function ArtistPage() {
           }
         }
 
-        const wikiQueries = [`"${displayArtistName}" musician`, `"${displayArtistName}" singer`, `${displayArtistName} musician`, displayArtistName];
-        const candidateTitles: string[] = [];
-        for (const term of wikiQueries) {
-          const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(term)}&srlimit=6&format=json&origin=*`;
-          const searchResponse = await fetch(searchUrl, { signal: controller.signal });
-          if (!searchResponse.ok) continue;
-          const payload = await searchResponse.json() as { query?: { search?: Array<{ title?: string }> } };
-          for (const result of payload.query?.search || []) {
-            if (result.title && !candidateTitles.includes(result.title)) candidateTitles.push(result.title);
-          }
+        const wikiProfile = await resolveArtistDescriptionRu(displayArtistName);
+        if (wikiProfile.description) setOnlineArtistDescription(wikiProfile.description);
+        if (wikiProfile.imageUrl) setOnlineArtistBanner((prev) => prev || wikiProfile.imageUrl || '');
+        if (artist?.id && wikiProfile.description && isPlaceholderArtistDescription(artist.description)) {
+          updateArtist(artist.id, { description: wikiProfile.description });
         }
-        let description = '';
-        let imageUrl = '';
-        let bestScore = -1;
-        for (const title of candidateTitles.slice(0, 10)) {
-          const summaryUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
-          const wikiResponse = await fetch(summaryUrl, { signal: controller.signal });
-          if (!wikiResponse.ok) continue;
-          const payload = await wikiResponse.json() as {
-            title?: string;
-            description?: string;
-            extract?: string;
-            thumbnail?: { source?: string };
-            originalimage?: { source?: string };
-          };
-          const combined = `${payload.title || ''} ${payload.description || ''} ${payload.extract || ''}`.toLowerCase();
-          if (combined.includes('disambiguation') || combined.includes('may refer to')) continue;
-          const firstParagraph = (payload.extract || '').split('\n').map((part) => part.trim()).find(Boolean);
-          if (!firstParagraph) continue;
-          const score =
-            (combined.includes(normalizeArtistName(displayArtistName)) ? 3 : 0) +
-            (combined.includes('musician') || combined.includes('artist') || combined.includes('singer') ? 2 : 0);
-          if (score > bestScore) {
-            bestScore = score;
-            description = trimBySentence(firstParagraph, 280);
-            imageUrl = payload.originalimage?.source || payload.thumbnail?.source || '';
-          }
-        }
-        if (description) setOnlineArtistDescription(description);
-        if (imageUrl) setOnlineArtistBanner((prev) => prev || imageUrl);
       } catch (error) {
         if ((error as Error).name === 'AbortError') return;
       }
     };
     void loadArtistMeta();
     return () => controller.abort();
-  }, [displayArtistName, isNew]);
+  }, [displayArtistName, isNew, artist?.id, artist?.description, updateArtist]);
 
   useEffect(() => {
     if (isNew || !displayArtistName.trim()) {
@@ -782,37 +744,6 @@ export function ArtistPage() {
       .replace(/\[\d{1,2}:\d{2}(?:\.\d{1,2})?\]\s*/g, '')
       .replace(/\n{3,}/g, '\n\n')
       .trim();
-  const trimBySentence = (text: string, maxLength: number): string => {
-    const normalized = text.replace(/\s+/g, ' ').trim();
-    if (!normalized) return '';
-    if (normalized.length <= maxLength) return normalized;
-    const sentences = normalized.split(/(?<=[.!?])\s+/).filter(Boolean);
-    let result = '';
-    for (const sentence of sentences) {
-      const candidate = result ? `${result} ${sentence}` : sentence;
-      if (candidate.length > maxLength) break;
-      result = candidate;
-    }
-    if (!result) {
-      const fallback = normalized.slice(0, Math.max(maxLength - 3, 1)).trimEnd();
-      return `${fallback}...`;
-    }
-    return `${result}...`;
-  };
-  const containsArtistKeywords = (value: string): boolean => {
-    const source = value.toLowerCase();
-    return ['singer', 'rapper', 'musician', 'band', 'artist', 'songwriter', 'record producer', 'dj', 'recording artist', 'composer']
-      .some((keyword) => source.includes(keyword));
-  };
-  const isMostlyLatin = (value: string): boolean => {
-    const letters = value.replace(/[^A-Za-z\u00C0-\u024F]/g, '');
-    if (!letters) return false;
-    return letters.length / Math.max(value.length, 1) > 0.45;
-  };
-  const isLikelyDisambiguation = (value: string): boolean => {
-    const text = value.toLowerCase();
-    return text.includes('disambiguation') || text.includes('may refer to');
-  };
   const getAudioDurationFromBlob = async (audioBlob: Blob): Promise<number> => {
     const objectUrl = URL.createObjectURL(audioBlob);
     try {
@@ -980,72 +911,11 @@ export function ArtistPage() {
       const targetTrackId = existingTrack?.id || `downloaded-${Date.now()}-${track.id}`;
       await saveAudioFile(targetTrackId, blob);
 
-      const fetchArtistProfile = async (artistName: string): Promise<{ description: string; imageUrl?: string }> => {
-        try {
-          const searchQueries = [`"${artistName}" musician`, `"${artistName}" singer`, `${artistName} musician`, artistName];
-          const candidateTitles: string[] = [];
-
-          for (const term of searchQueries) {
-            const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(term)}&srlimit=6&format=json&origin=*`;
-            const searchResponse = await fetch(searchUrl);
-            if (!searchResponse.ok) continue;
-            const payload = (await searchResponse.json()) as { query?: { search?: Array<{ title?: string }> } };
-            for (const item of payload.query?.search || []) {
-              if (item.title && !candidateTitles.includes(item.title)) {
-                candidateTitles.push(item.title);
-              }
-            }
-          }
-
-          let bestMatch: { score: number; description: string; imageUrl?: string } | null = null;
-          const normalizedArtist = artistName.trim().toLowerCase();
-
-          for (const title of candidateTitles.slice(0, 12)) {
-            const summaryUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
-            const wikiResponse = await fetch(summaryUrl);
-            if (!wikiResponse.ok) continue;
-
-            const wikiPayload = await wikiResponse.json() as {
-              extract?: string;
-              description?: string;
-              thumbnail?: { source?: string };
-              originalimage?: { source?: string };
-              title?: string;
-            };
-
-            const combinedMeta = `${wikiPayload.title || ''} ${wikiPayload.description || ''} ${wikiPayload.extract || ''}`;
-            if (isLikelyDisambiguation(combinedMeta)) continue;
-
-            const firstParagraph = (wikiPayload.extract || '')
-              .split('\n')
-              .map((part) => part.trim())
-              .find(Boolean);
-            if (!firstParagraph) continue;
-
-            const pageTitle = (wikiPayload.title || title).toLowerCase();
-            const score =
-              (pageTitle === normalizedArtist ? 4 : 0) +
-              (pageTitle.startsWith(normalizedArtist) ? 2 : 0) +
-              (containsArtistKeywords(combinedMeta) ? 3 : 0) +
-              (isMostlyLatin(pageTitle) === isMostlyLatin(normalizedArtist) ? 1 : 0);
-
-            const imageUrl = wikiPayload.originalimage?.source || wikiPayload.thumbnail?.source;
-            if (!bestMatch || score > bestMatch.score) {
-              bestMatch = { score, description: trimBySentence(firstParagraph, 280), imageUrl };
-            }
-          }
-
-          if (bestMatch) {
-            return { description: bestMatch.description, imageUrl: bestMatch.imageUrl };
-          }
-        } catch {
-          // Continue to static fallback below.
-        }
-
-        return {
-          description: `${artistName} - артист в твоей коллекции rainboow. Скачан автоматически по метаданным трека.`,
-        };
-      };
+      const fetchArtistProfile = async (artistName: string): Promise<{ description: string; imageUrl?: string }> => (
+        resolveArtistDescriptionRu(artistName, {
+          fallbackDescription: `${artistName} - артист в твоей коллекции rainboow. Скачан автоматически по метаданным трека.`,
+        })
+      );
 
       for (const artistName of sourceArtists) {
         const exists = Object.values(useMockServer.getState().artists).some(
@@ -1093,6 +963,17 @@ export function ArtistPage() {
             bannerUrl: bannerId,
             ownerId: currentUserId || undefined,
           });
+        } else if (track.artworkUrl) {
+          const existingArtist = Object.values(useMockServer.getState().artists).find(
+            (candidateArtist) => candidateArtist.name.trim().toLowerCase() === artistName.toLowerCase()
+          );
+          if (existingArtist) {
+            await ensureArtistBannerFromTrackCover({
+              artist: existingArtist,
+              coverUrl: track.artworkUrl,
+              updateArtist,
+            });
+          }
         }
       }
 
@@ -1198,7 +1079,7 @@ export function ArtistPage() {
         
         <button 
           onClick={handleBack}
-          className="absolute top-9 left-4 p-1 text-white z-20"
+          className="absolute top-9 right-4 p-1 text-white z-20"
         >
           <ArrowLeft className="w-6 h-6" />
         </button>
@@ -1460,12 +1341,18 @@ export function ArtistPage() {
                         subtitle={album.subtitle}
                         coverUrl={album.coverUrl}
                         type="album"
-                        onClick={() => navigate(albumRoute, {
-                          state: {
-                            fromArtist: true,
-                            returnToArtist: location.pathname + location.search,
-                          },
-                        })}
+                        onClick={() => {
+                          pushNavigationEntry({
+                            path: `${location.pathname}${location.search}`,
+                            state: getArtistBackState(),
+                          });
+                          navigate(albumRoute, {
+                            state: {
+                              fromArtist: true,
+                              returnToArtist: location.pathname + location.search,
+                            },
+                          });
+                        }}
                         imageActions={
                           <>
                             {!album.isFullyCached && album.onlineAlbumId ? (
@@ -1503,7 +1390,16 @@ export function ArtistPage() {
                               type="button"
                               onClick={() => {
                                 setAlbumActionMenuId(null);
-                                navigate(`/album/${album.localAlbumId}`);
+                                pushNavigationEntry({
+                                  path: `${location.pathname}${location.search}`,
+                                  state: getArtistBackState(),
+                                });
+                                navigate(`/album/${album.localAlbumId}`, {
+                                  state: {
+                                    fromArtist: true,
+                                    returnToArtist: location.pathname + location.search,
+                                  },
+                                });
                               }}
                               className="block w-full px-4 py-3 text-left text-sm hover:bg-violet-50"
                             >
@@ -1514,7 +1410,16 @@ export function ArtistPage() {
                             type="button"
                             onClick={() => {
                               setAlbumActionMenuId(null);
-                              navigate(albumRoute);
+                              pushNavigationEntry({
+                                path: `${location.pathname}${location.search}`,
+                                state: getArtistBackState(),
+                              });
+                              navigate(albumRoute, {
+                                state: {
+                                  fromArtist: true,
+                                  returnToArtist: location.pathname + location.search,
+                                },
+                              });
                             }}
                             className="block w-full px-4 py-3 text-left text-sm hover:bg-violet-50"
                           >
@@ -1524,7 +1429,16 @@ export function ArtistPage() {
                             type="button"
                             onClick={() => {
                               setAlbumActionMenuId(null);
-                              navigate(albumRoute);
+                              pushNavigationEntry({
+                                path: `${location.pathname}${location.search}`,
+                                state: getArtistBackState(),
+                              });
+                              navigate(albumRoute, {
+                                state: {
+                                  fromArtist: true,
+                                  returnToArtist: location.pathname + location.search,
+                                },
+                              });
                             }}
                             className="block w-full px-4 py-3 text-left text-sm hover:bg-violet-50"
                           >
