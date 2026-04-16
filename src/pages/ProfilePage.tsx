@@ -1,24 +1,21 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { useMockServer } from '../store/mockServer';
 import { usePlayerStore } from '../store/playerStore';
 import { Link } from 'react-router-dom';
-import { LogOut, Edit2, ExternalLink, CheckCircle2 } from 'lucide-react';
+import { LogOut, Edit2, Play, Music, ListMusic, Disc3 } from 'lucide-react';
 import { CachedImage } from '../components/CachedImage';
-
-const SOUNDCLOUD_CLIENT_ID_STORAGE_KEY = 'soundcloud-client-id';
 
 export function ProfilePage() {
   const { currentUserId, logout } = useAuthStore();
-  const { users, updateUser, playlists } = useMockServer();
+  const { users, updateUser, tracks, playlists } = useMockServer();
+  const { playTrack } = usePlayerStore();
   
   const user = currentUserId ? users[currentUserId] : null;
   
   const [isEditing, setIsEditing] = useState(false);
   const [emoji, setEmoji] = useState(user?.avatarEmoji || '🎵');
   const [gradient, setGradient] = useState(user?.avatarGradient || 'linear-gradient(135deg, #f6d365 0%, #fda085 100%)');
-  const [soundCloudClientId, setSoundCloudClientId] = useState('');
-  const [isSaved, setIsSaved] = useState(false);
 
   if (!user) return null;
 
@@ -37,21 +34,9 @@ export function ProfilePage() {
   ];
 
   const favoritePlaylists = user.favoritePlaylistIds?.map(id => playlists[id]).filter(Boolean) || [];
-  const isConnected = useMemo(() => soundCloudClientId.trim().length > 0, [soundCloudClientId]);
 
   useEffect(() => {
   }, [user.id, isEditing]);
-  
-  useEffect(() => {
-    const savedValue = window.localStorage.getItem(SOUNDCLOUD_CLIENT_ID_STORAGE_KEY) || '';
-    setSoundCloudClientId(savedValue);
-  }, []);
-
-  const handleSaveSoundCloudClientId = () => {
-    window.localStorage.setItem(SOUNDCLOUD_CLIENT_ID_STORAGE_KEY, soundCloudClientId.trim());
-    setIsSaved(true);
-    window.setTimeout(() => setIsSaved(false), 1500);
-  };
 
   return (
     <div className="p-4 pt-8 h-full overflow-y-auto scrollbar-hide">
@@ -121,57 +106,7 @@ export function ProfilePage() {
       )}
       
       <div>
-        <div className="bg-white/80 border border-violet-100 p-6 rounded-3xl mb-8">
-          <div className="flex items-center justify-between mb-3 gap-3">
-            <h3 className="text-lg font-bold">Интеграция SoundCloud</h3>
-            {isConnected ? (
-              <span className="text-xs px-2 py-1 rounded-full bg-emerald-100 text-emerald-700 font-semibold">Подключено</span>
-            ) : (
-              <span className="text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-700 font-semibold">Не подключено</span>
-            )}
-          </div>
-          <p className="text-sm text-slate-500 mb-4">
-            Вставьте ваш SoundCloud Client ID один раз, и поиск начнет работать во вкладке Обзор.
-          </p>
-          <div className="space-y-3">
-            <input
-              type="text"
-              value={soundCloudClientId}
-              onChange={(e) => setSoundCloudClientId(e.target.value)}
-              placeholder="Введите SoundCloud Client ID..."
-              className="w-full bg-violet-50 text-slate-700 px-4 py-3 rounded-xl border border-violet-100 focus:outline-none focus:ring-2 focus:ring-violet-200"
-            />
-            <button
-              onClick={handleSaveSoundCloudClientId}
-              className="w-full bg-violet-500 text-white font-bold py-3 rounded-xl hover:bg-violet-600 transition-colors"
-            >
-              Сохранить Client ID
-            </button>
-            {isSaved && (
-              <div className="text-sm text-emerald-600 flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4" />
-                Сохранено. Поиск SoundCloud готов.
-              </div>
-            )}
-          </div>
-          <div className="mt-4 p-3 rounded-xl bg-violet-50 border border-violet-100 text-sm text-slate-600">
-            <div className="font-semibold mb-1">Как получить Client ID</div>
-            <ol className="list-decimal list-inside space-y-1">
-              <li>Откройте SoundCloud for Developers.</li>
-              <li>Создайте приложение и скопируйте Client ID.</li>
-              <li>Вставьте его выше и нажмите Сохранить.</li>
-            </ol>
-            <a
-              href="https://developers.soundcloud.com/"
-              target="_blank"
-              rel="noreferrer"
-              className="mt-2 inline-flex items-center gap-1 text-violet-600 hover:text-violet-700 font-medium"
-            >
-              Открыть портал разработчика
-              <ExternalLink className="w-4 h-4" />
-            </a>
-          </div>
-        </div>
+        
       </div>
     </div>
   );

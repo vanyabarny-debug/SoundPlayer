@@ -23,16 +23,20 @@ export function LyricsView({ lyrics, coverUrl, onClose, children }: LyricsViewPr
   useEffect(() => {
     let objectUrl: string | undefined;
     if (coverUrl) {
-      getImageFile(coverUrl)
-        .then(blob => {
-          if (blob) {
-            objectUrl = URL.createObjectURL(blob);
-            setBgImageUrl(prevUrl => {
-              if (prevUrl) URL.revokeObjectURL(prevUrl);
-              return objectUrl;
-            });
-          }
-        });
+      if (coverUrl.startsWith('http')) {
+        setBgImageUrl(coverUrl);
+      } else {
+        getImageFile(coverUrl)
+          .then(blob => {
+            if (blob) {
+              objectUrl = URL.createObjectURL(blob);
+              setBgImageUrl(prevUrl => {
+                if (prevUrl) URL.revokeObjectURL(prevUrl);
+                return objectUrl;
+              });
+            }
+          });
+      }
     }
 
     return () => {

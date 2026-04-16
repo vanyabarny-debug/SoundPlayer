@@ -26,6 +26,7 @@ export function AlbumPage() {
   const albumItem = isNew ? null : albums[id || ''];
   const item = albumItem || playlistItem;
   const isAlbum = isNew ? typeParam === 'album' : Boolean(albumItem);
+  const album = isAlbum ? albumItem : null;
   
   const currentUser = currentUserId ? users[currentUserId] : null;
   const isFavorite = isAlbum
@@ -64,11 +65,11 @@ export function AlbumPage() {
   const [resolvedDurations, setResolvedDurations] = useState<Record<string, number>>({});
 
   useEffect(() => {
-    const currentArtistId = isAlbum && item ? (item.artistIds?.[0] as string | undefined) : undefined;
+    const currentArtistId = album?.artistIds?.[0];
     if (currentArtistId && artists[currentArtistId]) {
       setArtistName(artists[currentArtistId].name);
     }
-  }, [item, isAlbum, artists]);
+  }, [album, artists]);
 
   useEffect(() => {
   }, [id, isNew, isAlbum]);
@@ -114,7 +115,7 @@ export function AlbumPage() {
       await saveImageFile(coverId, coverFile);
     }
 
-    let finalArtistId = isAlbum ? item?.artistIds?.[0] : undefined;
+    let finalArtistId = album?.artistIds?.[0];
     if (isAlbum && artistName) {
       const existingArtist = allArtists.find(a => a.name.toLowerCase() === artistName.toLowerCase());
       if (existingArtist) {
@@ -333,15 +334,15 @@ export function AlbumPage() {
             <div className="min-w-0 pb-1">
               <div className="text-xs uppercase tracking-wider text-white/80 mb-1">{item?.status || (isAlbum ? 'Альбом' : 'Плейлист')}</div>
               <h1 className="text-4xl sm:text-5xl font-extrabold leading-tight truncate">
-                {isAlbum && item?.artistIds?.[0] && artists[item.artistIds[0]] ? (
+                {album?.artistIds?.[0] && artists[album.artistIds[0]] ? (
                   <button
-                    onClick={() => navigate(`/artist/${item.artistIds[0]}`)}
+                    onClick={() => navigate(`/artist/${album.artistIds[0]}`)}
                     className="hover:underline underline-offset-4"
                   >
-                    {artists[item.artistIds[0]].name}
+                    {artists[album.artistIds[0]].name}
                   </button>
                 ) : null}
-                {isAlbum && item?.artistIds?.[0] && artists[item.artistIds[0]] ? ' - ' : ''}
+                {album?.artistIds?.[0] && artists[album.artistIds[0]] ? ' - ' : ''}
                 {item?.title}
               </h1>
               <div className="text-sm text-white/80 mt-2">

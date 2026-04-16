@@ -31,14 +31,17 @@ export function FullPlayer({ onClose, track }: { onClose: () => void, track: Tra
   useEffect(() => {
     let objectUrl: string | undefined;
     if (track.coverUrl) {
-      getImageFile(track.coverUrl)
-        .then(blob => {
-          if (blob) {
-            objectUrl = URL.createObjectURL(blob);
-            return getAverageColor(objectUrl);
-          }
-          return Promise.reject('No blob');
-        })
+      const colorSourcePromise = track.coverUrl.startsWith('http')
+        ? getAverageColor(track.coverUrl)
+        : getImageFile(track.coverUrl).then(blob => {
+            if (blob) {
+              objectUrl = URL.createObjectURL(blob);
+              return getAverageColor(objectUrl);
+            }
+            return Promise.reject('No blob');
+          });
+
+      colorSourcePromise
         .then(color => {
           setTrackColor(color);
         })

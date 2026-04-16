@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, Music, Play, MoreVertical, Edit2, PlusCircle, Heart, Pause } from 'lucide-react';
+import { Search, Music, Play, MoreVertical, Edit2, PlusCircle, Heart, Pause, Download, Loader2, Check } from 'lucide-react';
 import { useMockServer, TrackMetadata } from '../store/mockServer';
 import { usePlayerStore } from '../store/playerStore';
 import { useAuthStore } from '../store/authStore';
@@ -13,8 +13,7 @@ import { AlbumTrackListItem } from '../components/AlbumTrackListItem';
 import { CachedImage } from '../components/CachedImage';
 import { escapeRegExp, toStringArray } from '../lib/safe';
 import { resolveArtistId } from '../lib/artistRouting';
-
-const SOUNDCLOUD_CLIENT_ID_STORAGE_KEY = 'soundcloud-client-id';
+import { saveAudioFile, saveImageFile } from '../lib/db';
 
 const Highlight = ({ text, highlight }: { text: string, highlight: string }) => {
   if (!highlight.trim() || !text) return <>{text}</>;
@@ -36,11 +35,91 @@ type NEMusicSearchResult = {
   id: string;
   title: string;
   artist: string;
+  album?: string;
   artworkUrl?: string;
+  sourceUrl?: string;
 };
 
-const NEMusicResultItem = ({ result, query }: { result: NEMusicSearchResult; query: string }) => (
-  <div className="flex items-center gap-3 p-2 rounded-3xl bg-white/60 hover:bg-white/80 transition-colors">
+const sanitizeDownloadFilename = (value: string): string =>
+  value
+    .replace(/[/\\?%*:|"<>]/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const extractFilenameFromDisposition = (contentDisposition: string | null): string | null => {
+  if (!contentDisposition) return null;
+
+  const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1]);
+    } catch {
+      return utf8Match[1];
+    }
+  }
+
+  const basicMatch = contentDisposition.match(/filename="?([^"]+)"?/i);
+  return basicMatch?.[1] ?? null;
+};
+
+const getAudioDurationFromBlob = async (audioBlob: Blob): Promise<number> => {
+  const objectUrl = URL.createObjectURL(audioBlob);
+  try {
+    return await new Promise<number>((resolve) => {
+      const audio = document.createElement('audio');
+      audio.preload = 'metadata';
+      audio.onloadedmetadata = () => resolve(Number.isFinite(audio.duration) ? audio.duration : 0);
+      audio.onerror = () => resolve(0);
+      audio.src = objectUrl;
+    });
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+};
+
+const toHighResArtworkUrl = (url?: string): string | undefined => {
+  if (!url) return undefined;
+  if (url.includes('100x100bb')) return url.replace('100x100bb', '1000x1000bb');
+  if (url.includes('100x100')) return url.replace('100x100', '1000x1000');
+  return url;
+};
+
+const splitArtistNames = (value: string): string[] => {
+  return value
+    .split(/\s*(?:,|&| x | X | and |;)\s*/g)
+    .map((part) => part.trim())
+    .filter(Boolean);
+};
+
+const extractFeaturingArtists = (title: string): string[] => {
+  const match = title.match(/(?:\(|\[)?\s*(?:feat\.|ft\.)\s+([^)|\]]+)(?:\)|\])?/i);
+  if (!match?.[1]) return [];
+  return splitArtistNames(match[1]);
+};
+
+const sanitizeLyricsForUi = (lyrics: string): string =>
+  lyrics
+    .replace(/\[\d{1,2}:\d{2}(?:\.\d{1,2})?\]\s*/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+const NEMusicResultItem = ({
+  result,
+  query,
+  onDownload,
+  onPlayDownloaded,
+  isLoading,
+  isSuccess,
+}: {
+  result: NEMusicSearchResult;
+  query: string;
+  onDownload: (result: NEMusicSearchResult) => void;
+  onPlayDownloaded: (result: NEMusicSearchResult) => void;
+  isLoading: boolean;
+  isSuccess: boolean;
+}) => {
+  return (
+    <div className="w-full text-left flex items-center gap-3 p-2 rounded-3xl bg-white/60 hover:bg-white/80 transition-colors">
     <div className="w-12 h-12 bg-violet-100 rounded-[2px] overflow-hidden flex-shrink-0 relative">
       {result.artworkUrl ? (
         <CachedImage src={result.artworkUrl} alt={result.title} className="w-full h-full object-cover" />
@@ -55,9 +134,41 @@ const NEMusicResultItem = ({ result, query }: { result: NEMusicSearchResult; que
       <div className="text-sm text-slate-400 truncate">
         <Highlight text={result.artist} highlight={query} />
       </div>
+      </div>
+      <div className="inline-flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onDownload(result)}
+          disabled={isLoading}
+          aria-label="Скачать и обработать трек"
+          className={`inline-flex items-center justify-center w-9 h-9 rounded-full transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
+            isSuccess
+              ? 'bg-emerald-100 text-emerald-600'
+              : 'bg-violet-100 text-violet-600 hover:bg-violet-200'
+          }`}
+        >
+          {isLoading ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : isSuccess ? (
+            <Check className="w-4 h-4" />
+          ) : (
+            <Download className="w-4 h-4" />
+          )}
+        </button>
+        {isSuccess && (
+          <button
+            type="button"
+            onClick={() => onPlayDownloaded(result)}
+            aria-label="Сразу воспроизвести скачанный трек"
+            className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-violet-100 text-violet-600 hover:bg-violet-200 transition-colors"
+          >
+            <Play className="w-4 h-4 ml-0.5" />
+          </button>
+        )}
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 type NEArtistSearchResult = {
   id: string;
@@ -124,9 +235,14 @@ export function BrowsePage() {
   const [neAlbumSearchResults, setNeAlbumSearchResults] = useState<NEAlbumSearchResult[]>([]);
   const [isNeMusicLoading, setIsNeMusicLoading] = useState(false);
   const [neMusicError, setNeMusicError] = useState<string | null>(null);
+  const [downloadLoadingId, setDownloadLoadingId] = useState<string | null>(null);
+  const [downloadSuccessIds, setDownloadSuccessIds] = useState<Record<string, true>>({});
+  const [downloadedTrackIds, setDownloadedTrackIds] = useState<Record<string, string>>({});
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const navigate = useNavigate();
 
-  const { tracks, artists, playlists, albums, users, updateUser } = useMockServer();
+  const { tracks, artists, playlists, albums, users, updateUser, addTrack, updateTrack, addArtist, deleteTrack } = useMockServer();
   const { playTrack, togglePlay, currentTrackId, isPlaying } = usePlayerStore();
   const { currentUserId } = useAuthStore();
   const user = currentUserId ? users[currentUserId] : null;
@@ -196,75 +312,72 @@ export function BrowsePage() {
       setIsNeMusicLoading(true);
       setNeMusicError(null);
       try {
-        const storedClientId = typeof window !== 'undefined'
-          ? window.localStorage.getItem(SOUNDCLOUD_CLIENT_ID_STORAGE_KEY) || ''
-          : '';
-        const soundCloudClientId = String(storedClientId || import.meta.env.VITE_SOUNDCLOUD_CLIENT_ID || '').trim();
-        if (!soundCloudClientId) {
-          throw new Error('Missing VITE_SOUNDCLOUD_CLIENT_ID');
-        }
         const endpoint =
           activeTab === 'tracks'
-            ? `https://api-v2.soundcloud.com/search/tracks?q=${encodeURIComponent(searchQuery.trim())}&client_id=${encodeURIComponent(soundCloudClientId)}&limit=30`
+            ? `https://itunes.apple.com/search?entity=song&limit=25&term=${encodeURIComponent(searchQuery.trim())}`
             : activeTab === 'artists'
-              ? `https://api-v2.soundcloud.com/search/users?q=${encodeURIComponent(searchQuery.trim())}&client_id=${encodeURIComponent(soundCloudClientId)}&limit=25`
-              : `https://api-v2.soundcloud.com/search/playlists?q=${encodeURIComponent(`${searchQuery.trim()} album`)}&client_id=${encodeURIComponent(soundCloudClientId)}&limit=25`;
+              ? `https://itunes.apple.com/search?entity=musicArtist&limit=25&term=${encodeURIComponent(searchQuery.trim())}`
+              : `https://itunes.apple.com/search?entity=album&limit=25&term=${encodeURIComponent(searchQuery.trim())}`;
         const response = await fetch(endpoint, { signal: controller.signal });
         if (!response.ok) {
           throw new Error(`Search request failed with status ${response.status}`);
         }
 
         const payload = (await response.json()) as {
-          collection?: Array<{
-            id?: number;
-            title?: string;
-            artwork_url?: string;
-            downloadable?: boolean;
-            user?: {
-              id?: number;
-              username?: string;
-              avatar_url?: string;
-            };
-            full_name?: string;
-            username?: string;
-            genre?: string;
-            track_count?: number;
-            avatar_url?: string;
+          results?: Array<{
+            trackId?: number;
+            trackName?: string;
+            artistName?: string;
+            trackViewUrl?: string;
+            previewUrl?: string;
+            artistId?: number;
+            artistType?: string;
+            primaryGenreName?: string;
+            collectionId?: number;
+            collectionName?: string;
+            collectionType?: string;
+            artworkUrl100?: string;
+            artworkUrl600?: string;
           }>;
         };
 
         if (activeTab === 'tracks') {
-          const results = (payload.collection || [])
-            .filter((item) => item.id && item.title && item.user?.username && item.downloadable)
+          const results = (payload.results || [])
+            .filter((item) => item.trackId && item.trackName && item.artistName)
             .map((item) => ({
-              id: String(item.id),
-              title: String(item.title),
-              artist: String(item.user?.username),
-              artworkUrl: item.artwork_url || undefined,
+              id: String(item.trackId),
+              title: String(item.trackName),
+              artist: String(item.artistName),
+              album: item.collectionName,
+              artworkUrl: item.artworkUrl600 || toHighResArtworkUrl(item.artworkUrl100),
+              sourceUrl: item.previewUrl || item.trackViewUrl,
             }));
           setNeMusicSearchResults(results);
           setNeArtistSearchResults([]);
           setNeAlbumSearchResults([]);
         } else if (activeTab === 'artists') {
-          const results = (payload.collection || [])
-            .filter((item) => item.id && (item.full_name || item.username))
+          const results = (payload.results || [])
+            .filter((item) => item.artistId && item.artistName)
             .map((item) => ({
-              id: String(item.id),
-              name: String(item.full_name || item.username),
-              genre: String(item.genre || 'Artist'),
-              artworkUrl: item.avatar_url || item.artwork_url || undefined,
+              id: String(item.artistId),
+              name: String(item.artistName),
+              genre: String(item.primaryGenreName || item.artistType || 'Artist'),
+              artworkUrl: item.artworkUrl100,
             }));
           setNeArtistSearchResults(results);
           setNeMusicSearchResults([]);
           setNeAlbumSearchResults([]);
         } else {
-          const results = (payload.collection || [])
-            .filter((item) => item.id && item.title && item.user?.username)
+          const results = (payload.results || [])
+            .filter((item) => {
+              if (!item.collectionId || !item.collectionName || !item.artistName) return false;
+              return String(item.collectionType || '').toLowerCase() === 'album';
+            })
             .map((item) => ({
-              id: String(item.id),
-              title: String(item.title),
-              artist: String(item.user?.username),
-              artworkUrl: item.artwork_url || undefined,
+              id: String(item.collectionId),
+              title: String(item.collectionName),
+              artist: String(item.artistName),
+              artworkUrl: item.artworkUrl100,
             }));
           setNeAlbumSearchResults(results);
           setNeMusicSearchResults([]);
@@ -275,11 +388,7 @@ export function BrowsePage() {
         setNeMusicSearchResults([]);
         setNeArtistSearchResults([]);
         setNeAlbumSearchResults([]);
-        if ((error as Error).message === 'Missing VITE_SOUNDCLOUD_CLIENT_ID') {
-          setNeMusicError('Добавьте SoundCloud Client ID в Профиле или в .env (VITE_SOUNDCLOUD_CLIENT_ID).');
-        } else {
-          setNeMusicError('Не удалось получить результаты поиска. Проверьте сеть и попробуйте снова.');
-        }
+        setNeMusicError('Не удалось получить результаты поиска. Проверьте сеть и попробуйте снова.');
       } finally {
         setIsNeMusicLoading(false);
       }
@@ -290,6 +399,197 @@ export function BrowsePage() {
       controller.abort();
     };
   }, [activeTab, hasQuery, searchQuery]);
+
+  const downloadResult = async (result: NEMusicSearchResult) => {
+    const downloadQuery = `${result.artist} - ${result.title}`;
+
+    setDownloadLoadingId(result.id);
+    setDownloadError(null);
+    try {
+      const response = await fetch('/api/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: downloadQuery,
+          title: result.title,
+          artist: result.artist,
+          album: result.album || '',
+          artworkUrl: result.artworkUrl || '',
+        }),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { error?: string; details?: string };
+        const detailMessage = typeof payload.details === 'string' ? payload.details.split('\n')[0] : '';
+        throw new Error(detailMessage || payload.error || 'Download request failed');
+      }
+
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const headerFilename = extractFilenameFromDisposition(response.headers.get('content-disposition'));
+      const headerLyricsEncoded = response.headers.get('x-track-lyrics');
+      const headerLyrics = headerLyricsEncoded ? sanitizeLyricsForUi(decodeURIComponent(headerLyricsEncoded)) : '';
+      const fallbackFilename = `${sanitizeDownloadFilename(`${result.artist} - ${result.title}`) || 'track'}-processed.mp3`;
+      const downloadFilename = sanitizeDownloadFilename(headerFilename || fallbackFilename) || 'download.mp3';
+
+      const normalizedArtist = result.artist.trim();
+      const normalizedTitle = result.title.trim();
+      const baseArtists = splitArtistNames(normalizedArtist);
+      const featuringArtists = extractFeaturingArtists(normalizedTitle);
+      const allArtistNames = Array.from(new Set([...baseArtists, ...featuringArtists]));
+
+      let downloadedCoverBlob: Blob | null = null;
+      if (result.artworkUrl) {
+        try {
+          const coverResponse = await fetch(result.artworkUrl);
+          if (coverResponse.ok) {
+            downloadedCoverBlob = await coverResponse.blob();
+          }
+        } catch {
+          // Keep working even if cover download fails.
+        }
+      }
+
+      const fetchArtistProfile = async (artistName: string): Promise<{ description: string; imageUrl?: string }> => {
+        try {
+          const wikiUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(artistName)}`;
+          const wikiResponse = await fetch(wikiUrl);
+          if (wikiResponse.ok) {
+            const wikiPayload = await wikiResponse.json() as {
+              extract?: string;
+              thumbnail?: { source?: string };
+              originalimage?: { source?: string };
+            };
+            const firstParagraph = (wikiPayload.extract || '')
+              .split('\n')
+              .map((part) => part.trim())
+              .find(Boolean);
+            const imageUrl = wikiPayload.originalimage?.source || wikiPayload.thumbnail?.source;
+            if (firstParagraph) {
+              return { description: firstParagraph.slice(0, 280), imageUrl };
+            }
+            if (imageUrl) {
+              return {
+                description: `${artistName} - артист в твоей коллекции rainboow. Скачан автоматически по метаданным трека.`,
+                imageUrl,
+              };
+            }
+          }
+        } catch {
+          // Continue to static fallback below.
+        }
+
+        return {
+          description: `${artistName} - артист в твоей коллекции rainboow. Скачан автоматически по метаданным трека.`,
+        };
+      };
+
+      for (const artistName of allArtistNames) {
+        const exists = Object.values(useMockServer.getState().artists).some(
+          (artist) => artist.name.trim().toLowerCase() === artistName.toLowerCase()
+        );
+        if (!exists) {
+          const { description, imageUrl } = await fetchArtistProfile(artistName);
+          const artistId = `artist-${Date.now()}-${artistName.toLowerCase().replace(/\s+/g, '-')}`;
+          let bannerId: string | undefined;
+
+          if (imageUrl) {
+            try {
+              const response = await fetch(imageUrl);
+              if (response.ok) {
+                bannerId = `artist-banner-${artistId}`;
+                await saveImageFile(bannerId, await response.blob());
+              }
+            } catch {
+              // fallback to track cover below
+            }
+          }
+
+          if (!bannerId && downloadedCoverBlob) {
+            bannerId = `artist-banner-${artistId}`;
+            await saveImageFile(bannerId, downloadedCoverBlob);
+          }
+
+          addArtist({
+            id: artistId,
+            name: artistName,
+            description,
+            bannerUrl: bannerId,
+            ownerId: currentUserId || undefined,
+          });
+        }
+      }
+
+      const existingTrack = Object.values(tracks).find(
+        (track) =>
+          track.title.trim().toLowerCase() === normalizedTitle.toLowerCase() &&
+          toStringArray(track.artistIds).join(', ').trim().toLowerCase() === normalizedArtist.toLowerCase()
+      );
+
+      const targetTrackId = existingTrack?.id || `downloaded-${Date.now()}-${result.id}`;
+      await saveAudioFile(targetTrackId, blob);
+      let coverId: string | undefined = existingTrack?.coverUrl;
+      if (downloadedCoverBlob) {
+        coverId = `cover-${targetTrackId}`;
+        await saveImageFile(coverId, downloadedCoverBlob);
+      }
+
+      if (!existingTrack) {
+        const duration = await getAudioDurationFromBlob(blob);
+        const newTrack: TrackMetadata = {
+          id: targetTrackId,
+          title: normalizedTitle || downloadFilename.replace(/\.mp3$/i, ''),
+          artistIds: allArtistNames.length > 0 ? allArtistNames : ['Unknown artist'],
+          duration,
+          isExplicit: false,
+          isSingle: true,
+          format: 'mp3',
+          coverUrl: coverId,
+          ownerId: currentUserId || 'system',
+          lyrics: headerLyrics,
+          features: featuringArtists,
+        };
+        addTrack(newTrack);
+      } else {
+        updateTrack(existingTrack.id, {
+          artistIds: allArtistNames.length > 0 ? allArtistNames : existingTrack.artistIds,
+          features: featuringArtists.length > 0 ? featuringArtists : existingTrack.features,
+          coverUrl: coverId || existingTrack.coverUrl,
+          lyrics: headerLyrics || existingTrack.lyrics,
+        });
+      }
+
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = downloadFilename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+
+      setDownloadSuccessIds((prev) => ({ ...prev, [result.id]: true }));
+      setDownloadedTrackIds((prev) => ({ ...prev, [result.id]: targetTrackId }));
+    } catch (error) {
+      setDownloadError((error as Error).message || 'Не удалось обработать файл.');
+    } finally {
+      setDownloadLoadingId(null);
+    }
+  };
+
+  const playDownloadedResult = (result: NEMusicSearchResult) => {
+    const downloadedTrackId = downloadedTrackIds[result.id];
+    if (!downloadedTrackId) return;
+    const queueSource = hasQuery ? searchResultsTracks : allTracks;
+    const queue = queueSource.map((track) => track.id);
+    const playbackQueue = queue.includes(downloadedTrackId) ? queue : [downloadedTrackId, ...queue];
+    playTrack(downloadedTrackId, playbackQueue, null);
+  };
+
+  const removeTrackFromApp = (trackId: string) => {
+    deleteTrack(trackId);
+    setNotice('Трек удалён только из приложения. Файл по-прежнему хранится на вашем устройстве.');
+    window.setTimeout(() => setNotice(null), 3500);
+  };
 
   const handleToggleFavoriteArtist = (e: React.MouseEvent, artistId: string) => {
     e.stopPropagation();
@@ -374,10 +674,21 @@ export function BrowsePage() {
                   <div className="text-sm text-rose-500 py-3">{neMusicError}</div>
                 )}
                 {neMusicSearchResults.map((result) => (
-                  <NEMusicResultItem key={result.id} result={result} query={searchQuery} />
+                  <NEMusicResultItem
+                    key={result.id}
+                    result={result}
+                    query={searchQuery}
+                    onDownload={downloadResult}
+                    onPlayDownloaded={playDownloadedResult}
+                    isLoading={downloadLoadingId === result.id}
+                    isSuccess={Boolean(downloadSuccessIds[result.id])}
+                  />
                 ))}
                 {!isNeMusicLoading && !neMusicError && neMusicSearchResults.length === 0 && (
                   <div className="text-sm text-zinc-500 py-3">По вашему запросу NEmusic ничего не нашёл.</div>
+                )}
+                {downloadError && (
+                  <div className="text-sm text-rose-500 py-2">{downloadError}</div>
                 )}
               </div>
             </div>
@@ -407,6 +718,7 @@ export function BrowsePage() {
                 }}
                 onAddToPlaylist={() => setAddingToPlaylistTrackId(track.id)}
                 onEdit={() => setEditingTrack(track)}
+                onDelete={() => removeTrackFromApp(track.id)}
               />
             ))}
             {(hasQuery ? searchResultsAlbums : allAlbums).map((album) => {
@@ -539,6 +851,11 @@ export function BrowsePage() {
 
       {editingTrack && <EditTrackModal track={editingTrack} onClose={() => setEditingTrack(null)} />}
       {addingToPlaylistTrackId && <AddToPlaylistModal trackId={addingToPlaylistTrackId} onClose={() => setAddingToPlaylistTrackId(null)} />}
+      {notice && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[120] px-4 py-2 rounded-full bg-slate-900 text-white text-sm shadow-xl">
+          {notice}
+        </div>
+      )}
     </div>
   );
 }

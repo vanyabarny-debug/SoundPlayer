@@ -1,5 +1,5 @@
 import React from 'react';
-import { Music, Play, Pause, MoreVertical, Heart, PlusCircle, Edit2 } from 'lucide-react';
+import { Music, Play, Pause, MoreVertical, Heart, PlusCircle, Edit2, Trash2 } from 'lucide-react';
 import { TrackMetadata, User } from '../store/mockServer';
 import { CachedImage } from './CachedImage';
 import { escapeRegExp, toStringArray } from '../lib/safe';
@@ -66,12 +66,13 @@ interface TrackListItemProps {
   onAddToAlbum?: () => void;
   onArtistClick?: (artistRef: string) => void;
   onEdit: () => void;
+  onDelete?: () => void;
   showMenu?: boolean;
 }
 
 export function TrackListItem({ 
   track, user, isPlaying, isActive, leadingContent, searchQuery, 
-  onPlay, onToggleFavorite, onAddToPlaylist, onAddToAlbum, onArtistClick, onEdit, showMenu = true
+  onPlay, onToggleFavorite, onAddToPlaylist, onAddToAlbum, onArtistClick, onEdit, onDelete, showMenu = true
 }: TrackListItemProps) {
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
   const artistRefs = toStringArray(track.artistIds);
@@ -180,6 +181,14 @@ export function TrackListItem({
           >
             <Edit2 className="w-4 h-4" /> Редактировать
           </button>
+          {onDelete && (
+            <button
+              className="w-full text-left px-4 py-3 text-sm hover:bg-rose-50 text-rose-600 flex items-center gap-2"
+              onClick={(e) => { e.stopPropagation(); onDelete(); setIsMenuOpen(false); }}
+            >
+              <Trash2 className="w-4 h-4" /> Удалить из приложения
+            </button>
+          )}
         </div>
       )}
     </div>

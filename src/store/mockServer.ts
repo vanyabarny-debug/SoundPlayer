@@ -72,6 +72,7 @@ interface MockServerState {
   updateUser: (id: string, data: Partial<User>) => void;
   addTrack: (track: TrackMetadata) => void;
   updateTrack: (id: string, data: Partial<TrackMetadata>) => void;
+  deleteTrack: (id: string) => void;
   addArtist: (artist: Artist) => void;
   updateArtist: (id: string, data: Partial<Artist>) => void;
   addPlaylist: (playlist: Playlist) => void;
@@ -93,6 +94,43 @@ export const useMockServer = create<MockServerState>()(
       updateUser: (id, data) => set((state) => ({ users: { ...state.users, [id]: { ...state.users[id], ...data } } })),
       addTrack: (track) => set((state) => ({ tracks: { ...state.tracks, [track.id]: track } })),
       updateTrack: (id, data) => set((state) => ({ tracks: { ...state.tracks, [id]: { ...state.tracks[id], ...data } } })),
+      deleteTrack: (id) => set((state) => {
+        const { [id]: _removedTrack, ...restTracks } = state.tracks;
+        const updatedUsers = Object.fromEntries(
+          Object.entries(state.users).map(([userId, user]) => [
+            userId,
+            {
+              ...user,
+              favoriteTrackIds: (user.favoriteTrackIds || []).filter((trackId) => trackId !== id),
+            },
+          ])
+        );
+        const updatedPlaylists = Object.fromEntries(
+          Object.entries(state.playlists).map(([playlistId, playlist]) => [
+            playlistId,
+            {
+              ...playlist,
+              trackIds: (playlist.trackIds || []).filter((trackId) => trackId !== id),
+            },
+          ])
+        );
+        const updatedAlbums = Object.fromEntries(
+          Object.entries(state.albums).map(([albumId, album]) => [
+            albumId,
+            {
+              ...album,
+              trackIds: (album.trackIds || []).filter((trackId) => trackId !== id),
+            },
+          ])
+        );
+
+        return {
+          tracks: restTracks,
+          users: updatedUsers,
+          playlists: updatedPlaylists,
+          albums: updatedAlbums,
+        };
+      }),
       addArtist: (artist) => set((state) => ({ artists: { ...state.artists, [artist.id]: artist } })),
       updateArtist: (id, data) => set((state) => ({ artists: { ...state.artists, [id]: { ...state.artists[id], ...data } } })),
       addPlaylist: (playlist) => set((state) => ({ playlists: { ...state.playlists, [playlist.id]: playlist } })),
