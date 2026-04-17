@@ -48,7 +48,21 @@ def _resolve_candidate_url(entry: dict[str, Any]) -> str:
     return ""
 
 
+def _extract_blocked_video_ids(message: str) -> set[str]:
+    ids = set(re.findall(r"\[youtube\]\s+([A-Za-z0-9_-]{11}):", message))
+    return ids
+
+
+def _extract_video_id_from_url(url: str) -> str:
+    direct = re.search(r"(?:v=|/shorts/|/embed/)([A-Za-z0-9_-]{11})", url)
+    if direct:
+        return direct.group(1)
+    tail = re.search(r"/([A-Za-z0-9_-]{11})(?:[/?#]|$)", url)
+    return tail.group(1) if tail else ""
+
+
 def _download_with_fallback(ydl_opts: dict[str, object], query: str) -> tuple[dict[str, Any], str]:
+    blocked_ids: set[str] = set()
     try:
         with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(query, download=True)
@@ -61,34 +75,51 @@ def _download_with_fallback(ydl_opts: dict[str, object], query: str) -> tuple[di
             requested = ydl.prepare_filename(info)
             return info, requested
     except Exception as error:
-        if not _is_retryable_yt_error(str(error)):
+        error_text = str(error)
+        blocked_ids.update(_extract_blocked_video_ids(error_text))
+        if not _is_retryable_yt_error(error_text):
             raise
 
-    discovery_opts = dict(ydl_opts)
-    discovery_opts["skip_download"] = True
-    discovery_opts["default_search"] = "ytsearch8"
-    discovery_opts["extract_flat"] = True
     candidates: list[str] = []
-    try:
-        with YoutubeDL(discovery_opts) as ydl:
-            discovered = ydl.extract_info(query, download=False)
-    except Exception:
-        discovered = None
+    discovery_queries = [query, f"{query} official audio", f"{query} topic"]
+    for discovery_query in discovery_queries:
+        discovery_opts = dict(ydl_opts)
+        discovery_opts["skip_download"] = True
+        discovery_opts["default_search"] = "ytsearch8"
+        discovery_opts["extract_flat"] = True
+        try:
+            with YoutubeDL(discovery_opts) as ydl:
+                discovered = ydl.extract_info(discovery_query, download=False)
+        except Exception:
+            discovered = None
 
-    if isinstance(discovered, dict):
+        if not isinstance(discovered, dict):
+            continue
         entries = discovered.get("entries")
         if isinstance(entries, list):
             for entry in entries:
                 if isinstance(entry, dict):
                     candidate = _resolve_candidate_url(entry)
-                    if candidate and candidate not in candidates:
+                    if not candidate:
+                        continue
+                    candidate_id = _extract_video_id_from_url(candidate)
+                    if candidate_id and candidate_id in blocked_ids:
+                        continue
+                    if candidate not in candidates:
                         candidates.append(candidate)
         direct_candidate = _resolve_candidate_url(discovered)
-        if direct_candidate and direct_candidate not in candidates:
-            candidates.insert(0, direct_candidate)
+        if direct_candidate:
+            direct_candidate_id = _extract_video_id_from_url(direct_candidate)
+            if direct_candidate_id and direct_candidate_id in blocked_ids:
+                continue
+            if direct_candidate not in candidates:
+                candidates.insert(0, direct_candidate)
 
     errors: list[str] = []
     for candidate in candidates:
+        candidate_id = _extract_video_id_from_url(candidate)
+        if candidate_id and candidate_id in blocked_ids:
+            continue
         try:
             with YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(candidate, download=True)
@@ -97,7 +128,10 @@ def _download_with_fallback(ydl_opts: dict[str, object], query: str) -> tuple[di
                 requested = ydl.prepare_filename(info)
                 return info, requested
         except Exception as error:
-            errors.append(str(error))
+            error_text = str(error)
+            errors.append(error_text)
+            if _is_retryable_yt_error(error_text):
+                blocked_ids.update(_extract_blocked_video_ids(error_text))
             continue
 
     details = " | ".join(errors[:3]) if errors else "No playable fallback candidates were found"
