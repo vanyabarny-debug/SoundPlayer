@@ -6,3 +6,5 @@ coverage/
 *.log
 .env*
 !.env.example
+cookies.txt
+youtube_cookies.txt

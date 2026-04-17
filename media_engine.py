@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
 import sys
+import tempfile
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -13,6 +15,39 @@ from urllib.request import Request, urlopen
 
 from mutagen.id3 import APIC, TALB, TIT2, TPE1, USLT, ID3, ID3NoHeaderError
 from yt_dlp import YoutubeDL
+
+
+def _write_cookies_from_env() -> str | None:
+    encoded = os.getenv("YT_COOKIES_BASE64", "").strip()
+    if not encoded:
+        return None
+
+    try:
+        decoded_bytes = base64.b64decode(encoded, validate=True)
+    except Exception:
+        try:
+            decoded_bytes = base64.urlsafe_b64decode(encoded + "===")
+        except Exception:
+            return None
+
+    if not decoded_bytes:
+        return None
+
+    try:
+        text = decoded_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+    if "youtube.com" not in text.lower():
+        return None
+
+    temp_file = tempfile.NamedTemporaryFile(prefix="yt-cookies-", suffix=".txt", delete=False)
+    try:
+        temp_file.write(text.encode("utf-8"))
+        temp_file.flush()
+        return temp_file.name
+    finally:
+        temp_file.close()
 
 
 def _is_retryable_yt_error(message: str) -> bool:
@@ -342,7 +377,18 @@ def process_media(payload: dict[str, Any] | str) -> dict[str, object]:
         ],
     }
 
-    info, requested = _download_with_fallback(ydl_opts, normalized_query)
+    cookies_file_path = _write_cookies_from_env()
+    if cookies_file_path:
+        ydl_opts["cookiefile"] = cookies_file_path
+
+    try:
+        info, requested = _download_with_fallback(ydl_opts, normalized_query)
+    finally:
+        if cookies_file_path:
+            try:
+                os.remove(cookies_file_path)
+            except OSError:
+                pass
 
     requested_path = Path(requested)
     mp3_path = requested_path.with_suffix(".mp3")

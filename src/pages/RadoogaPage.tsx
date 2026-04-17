@@ -39,6 +39,7 @@ import { pushNavigationEntry } from '../lib/navigationHistory';
 import { resolveArtistDescriptionRu } from '../lib/wikiDescriptions';
 import { ensureArtistBannerFromTrackCover } from '../lib/artistBannerCache';
 import { apiUrl } from '../lib/apiUrl';
+import { upsertPreviewOnlyTrack } from '../lib/previewFallback';
 
 const sanitizeFilename = (value: string): string =>
   value
@@ -876,11 +877,15 @@ export function RadoogaPage() {
           ownerId: currentUserId || 'system',
           lyrics: headerLyrics || undefined,
           features: featureOnlyNames,
+          previewUrl: candidate.previewUrl,
+          isPreviewOnly: false,
         });
       } else if (coverId || headerLyrics) {
         liveState.updateTrack(existingTrack.id, {
           coverUrl: coverId || existingTrack.coverUrl,
           lyrics: headerLyrics || existingTrack.lyrics,
+          previewUrl: candidate.previewUrl || existingTrack.previewUrl,
+          isPreviewOnly: false,
         });
       }
       const authState = useAuthStore.getState();
@@ -896,6 +901,21 @@ export function RadoogaPage() {
       }
       return finalTrackId;
     } catch (downloadError) {
+      if (candidate.previewUrl) {
+        const previewTrackId = upsertPreviewOnlyTrack({
+          existingTracks: useMockServer.getState().tracks,
+          resultId: candidate.id,
+          title: candidate.title,
+          artist: candidate.artist,
+          artworkUrl: candidate.artworkUrl,
+          previewUrl: candidate.previewUrl,
+          ownerId: currentUserId || 'system',
+          addTrack: useMockServer.getState().addTrack,
+          updateTrack: useMockServer.getState().updateTrack,
+        });
+        setLocalError('Полная версия недоступна, добавили preview-трек. Попробуйте скачать позже.');
+        return previewTrackId;
+      }
       setLocalError((downloadError as Error).message || 'Не удалось обработать выбранный трек.');
       setSendStatus('error');
       return null;

@@ -29,6 +29,7 @@ import { popNavigationEntry, pushNavigationEntry } from '../lib/navigationHistor
 import { isPlaceholderArtistDescription, resolveArtistDescriptionRu } from '../lib/wikiDescriptions';
 import { ensureArtistBannerFromTrackCover } from '../lib/artistBannerCache';
 import { apiUrl } from '../lib/apiUrl';
+import { upsertPreviewOnlyTrack } from '../lib/previewFallback';
 
 export function ArtistPage() {
   const { id } = useParams<{ id: string }>();
@@ -1005,6 +1006,8 @@ export function ArtistPage() {
           ownerId: currentUserId || 'system',
           lyrics: headerLyrics,
           features: featuringArtists,
+          previewUrl: track.previewUrl,
+          isPreviewOnly: false,
         });
         return targetTrackId;
       } else {
@@ -1013,6 +1016,8 @@ export function ArtistPage() {
           coverUrl: coverId || existingTrack.coverUrl,
           lyrics: headerLyrics || existingTrack.lyrics,
           features: featuringArtists.length > 0 ? featuringArtists : existingTrack.features,
+          previewUrl: track.previewUrl || existingTrack.previewUrl,
+          isPreviewOnly: false,
         });
         return existingTrack.id;
       }
@@ -1029,7 +1034,30 @@ export function ArtistPage() {
         }
       }
     } catch (error) {
-      setDownloadError((error as Error).message || 'Не удалось скачать трек.');
+      if (track.previewUrl) {
+        const previewTrackId = upsertPreviewOnlyTrack({
+          existingTracks: useMockServer.getState().tracks,
+          resultId: track.id,
+          title: track.title,
+          artist: track.artist,
+          artworkUrl: track.artworkUrl,
+          previewUrl: track.previewUrl,
+          ownerId: currentUserId || 'system',
+          addTrack: useMockServer.getState().addTrack,
+          updateTrack: useMockServer.getState().updateTrack,
+        });
+        if (isVirtualArtist) {
+          const localArtistId = resolveArtistId(displayArtistName, useMockServer.getState().artists);
+          if (localArtistId) {
+            navigate(`/artist/${localArtistId}`, { replace: true });
+          }
+        } else {
+          playTrack(previewTrackId, [previewTrackId], null);
+        }
+        setDownloadError('Полная версия сейчас недоступна. Добавили preview-трек, можно попробовать скачать позже.');
+      } else {
+        setDownloadError((error as Error).message || 'Не удалось скачать трек.');
+      }
     } finally {
       setDownloadLoadingId(null);
     }
@@ -1274,7 +1302,7 @@ export function ArtistPage() {
                       isPlaying={isPlaying}
                       canDownload
                       isDownloading={downloadLoadingId === track.id}
-                      isDownloaded={Boolean(localTrack)}
+                      isDownloaded={Boolean(localTrack && !localTrack.isPreviewOnly)}
                       onDownload={() => downloadPopularTrack(track)}
                       onArtistClick={(artistName) => navigate(resolveArtistRoute(artistName, artists))}
                       onOpenRecommendations={() => {

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { usePlayerStore } from '../store/playerStore';
+import { useMockServer } from '../store/mockServer';
 import { getAudioFile } from '../lib/db';
 
 export function AudioPlayer() {
@@ -23,6 +24,8 @@ export function AudioPlayer() {
     setAudioOutputSwitchSupported,
   } = usePlayerStore();
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const tracks = useMockServer((state) => state.tracks);
+  const currentTrack = currentTrackId ? tracks[currentTrackId] : null;
   const analyserContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
@@ -90,6 +93,9 @@ export function AudioPlayer() {
           objectUrl = URL.createObjectURL(file);
           setAudioUrl(objectUrl);
           setLoading(false);
+        } else if (currentTrack?.previewUrl) {
+          setAudioUrl(currentTrack.previewUrl);
+          setLoading(false);
         } else {
           console.log(`Simulating P2P download for track ${currentTrackId}...`);
           // Simulate network delay for P2P
@@ -118,7 +124,7 @@ export function AudioPlayer() {
         URL.revokeObjectURL(objectUrl);
       }
     };
-  }, [currentTrackId, previewUrl]);
+  }, [currentTrackId, previewUrl, currentTrack?.previewUrl]);
 
   useEffect(() => {
     const audio = audioRef.current;

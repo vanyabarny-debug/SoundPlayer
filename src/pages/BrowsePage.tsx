@@ -34,6 +34,7 @@ import { pushNavigationEntry } from '../lib/navigationHistory';
 import { resolveArtistDescriptionRu } from '../lib/wikiDescriptions';
 import { ensureArtistBannerFromTrackCover } from '../lib/artistBannerCache';
 import { apiUrl } from '../lib/apiUrl';
+import { upsertPreviewOnlyTrack } from '../lib/previewFallback';
 
 const Highlight = ({ text, highlight }: { text: string, highlight: string }) => {
   if (!highlight.trim() || !text) return <>{text}</>;
@@ -1341,6 +1342,8 @@ export function BrowsePage() {
           ownerId: currentUserId || 'system',
           lyrics: headerLyrics,
           features: featuringArtists,
+          previewUrl: result.previewUrl,
+          isPreviewOnly: false,
         };
         addTrack(newTrack);
       } else {
@@ -1349,6 +1352,8 @@ export function BrowsePage() {
           features: featuringArtists.length > 0 ? featuringArtists : existingTrack.features,
           coverUrl: coverId || existingTrack.coverUrl,
           lyrics: headerLyrics || existingTrack.lyrics,
+          previewUrl: result.previewUrl || existingTrack.previewUrl,
+          isPreviewOnly: false,
         });
       }
 
@@ -1380,7 +1385,32 @@ export function BrowsePage() {
         playTrack(targetTrackId, playbackQueue, null);
       }
     } catch (error) {
-      setDownloadError((error as Error).message || 'Не удалось скачать трек. Попробуйте ещё раз.');
+      if (result.previewUrl) {
+        const previewTrackId = upsertPreviewOnlyTrack({
+          existingTracks: useMockServer.getState().tracks,
+          resultId: result.id,
+          title: result.title,
+          artist: result.artist,
+          artworkUrl: result.artworkUrl,
+          previewUrl: result.previewUrl,
+          ownerId: currentUserId || 'system',
+          addTrack: useMockServer.getState().addTrack,
+          updateTrack: useMockServer.getState().updateTrack,
+        });
+        setDownloadedTrackIds((prev) => ({ ...prev, [result.id]: previewTrackId }));
+        setOverviewOrder((prev) => {
+          const trackKey = toOverviewItemKey({ type: 'track', id: previewTrackId });
+          return [trackKey, ...prev.filter((key) => key !== trackKey)];
+        });
+        if (options?.autoplayAfterDownload) {
+          const queue = Object.values(useMockServer.getState().tracks).map((track) => track.id);
+          const playbackQueue = queue.includes(previewTrackId) ? queue : [previewTrackId, ...queue];
+          playTrack(previewTrackId, playbackQueue, null);
+        }
+        setDownloadError('Полная версия сейчас недоступна. Добавили preview-трек, можно попробовать скачать позже.');
+      } else {
+        setDownloadError((error as Error).message || 'Не удалось скачать трек. Попробуйте ещё раз.');
+      }
     } finally {
       setDownloadLoadingId(null);
     }
@@ -1966,7 +1996,7 @@ export function BrowsePage() {
                         isPlaying={isPlaying}
                         canDownload
                         isDownloading={downloadLoadingId === result.id}
-                        isDownloaded={Boolean(downloadedTrack?.id)}
+                        isDownloaded={Boolean(downloadedTrack?.id && !downloadedTrack.isPreviewOnly)}
                         emphasizeDownloaded
                         onDownload={() => downloadResult(result, { autoplayAfterDownload: true })}
                         onArtistClick={(artistName) => navigateWithBrowseContext(resolveArtistRoute(artistName, artists))}
@@ -2020,7 +2050,7 @@ export function BrowsePage() {
                         isPlaying={isPlaying}
                         canDownload
                         isDownloading={downloadLoadingId === result.id}
-                        isDownloaded={Boolean(downloadedTrack?.id)}
+                        isDownloaded={Boolean(downloadedTrack?.id && !downloadedTrack.isPreviewOnly)}
                         emphasizeDownloaded
                         onDownload={() => downloadResult(result)}
                         onArtistClick={(artistName) => navigateWithBrowseContext(resolveArtistRoute(artistName, artists))}
@@ -2114,7 +2144,7 @@ export function BrowsePage() {
                           isPlaying={isPlaying}
                           canDownload
                           isDownloading={downloadLoadingId === result.id}
-                          isDownloaded={Boolean(downloadedTrack?.id)}
+                          isDownloaded={Boolean(downloadedTrack?.id && !downloadedTrack.isPreviewOnly)}
                           onDownload={() => downloadResult(result)}
                           onArtistClick={(artistName) => navigate(resolveArtistRoute(artistName, artists))}
                           onPlay={() => playOnlineResult(result)}
@@ -2178,7 +2208,7 @@ export function BrowsePage() {
                               isPlaying={isPlaying}
                               canDownload
                               isDownloading={downloadLoadingId === result.id}
-                              isDownloaded={Boolean(downloadedTrack?.id)}
+                              isDownloaded={Boolean(downloadedTrack?.id && !downloadedTrack.isPreviewOnly)}
                               onDownload={() => downloadResult(result)}
                               onArtistClick={(artistName) => navigate(resolveArtistRoute(artistName, artists))}
                               onPlay={() => playOnlineResult(result)}

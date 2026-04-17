@@ -140,6 +140,7 @@ export function TrackListItem({
         )}
       </div>
       <div className="flex gap-1 opacity-100 transition-opacity mr-2">
+        {track.isPreviewOnly && <span className="px-1.5 py-0.5 text-amber-600 text-[9px] font-bold rounded-full">PREVIEW</span>}
         {track.isExplicit && <span className="px-1.5 py-0.5 text-violet-600 text-[9px] font-bold rounded-full">E</span>}
         <span className="px-1.5 py-0.5 text-violet-600 text-[9px] font-bold rounded-full uppercase">{track.format}</span>
       </div>

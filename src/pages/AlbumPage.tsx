@@ -15,6 +15,7 @@ import { popNavigationEntry, pushNavigationEntry } from '../lib/navigationHistor
 import { resolveAlbumDescriptionRu } from '../lib/wikiDescriptions';
 import { ensureArtistBannerFromTrackCover } from '../lib/artistBannerCache';
 import { apiUrl } from '../lib/apiUrl';
+import { upsertPreviewOnlyTrack } from '../lib/previewFallback';
 
 export function AlbumPage() {
   const { id } = useParams<{ id: string }>();
@@ -540,6 +541,7 @@ export function AlbumPage() {
     });
   };
   const persistItunesTrack = async (track: OnlineTrackItemData): Promise<string> => {
+    const existingTrack = findLocalTrackByOnline(track);
     const response = await fetch(apiUrl('/api/download'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -552,7 +554,7 @@ export function AlbumPage() {
     });
     if (!response.ok) throw new Error('Download request failed');
     const blob = await response.blob();
-    const targetTrackId = `downloaded-${Date.now()}-${track.id}`;
+    const targetTrackId = existingTrack?.id || `downloaded-${Date.now()}-${track.id}`;
     await saveAudioFile(targetTrackId, blob);
     const blobUrl = URL.createObjectURL(blob);
     const headerFilename = extractFilenameFromDisposition(response.headers.get('content-disposition'));
@@ -579,17 +581,28 @@ export function AlbumPage() {
       }
     }
     const duration = await getAudioDurationFromBlob(blob);
-    addTrack({
-      id: targetTrackId,
-      title: track.title.trim() || 'Unknown title',
-      artistIds: splitArtistNames(track.artist),
-      duration,
-      isExplicit: false,
-      isSingle: true,
-      format: 'mp3',
-      coverUrl: coverId,
-      ownerId: currentUserId || 'system',
-    });
+    if (!existingTrack) {
+      addTrack({
+        id: targetTrackId,
+        title: track.title.trim() || 'Unknown title',
+        artistIds: splitArtistNames(track.artist),
+        duration,
+        isExplicit: false,
+        isSingle: true,
+        format: 'mp3',
+        coverUrl: coverId,
+        ownerId: currentUserId || 'system',
+        previewUrl: track.previewUrl,
+        isPreviewOnly: false,
+      });
+    } else {
+      updateTrack(existingTrack.id, {
+        duration,
+        coverUrl: coverId || existingTrack.coverUrl,
+        previewUrl: track.previewUrl || existingTrack.previewUrl,
+        isPreviewOnly: false,
+      });
+    }
     const liveArtists = useMockServer.getState().artists;
     for (const artistName of splitArtistNames(track.artist)) {
       const existingArtist = Object.values(liveArtists).find(
@@ -612,7 +625,23 @@ export function AlbumPage() {
       const trackId = existingLocal?.id || await persistItunesTrack(track);
       addTrackToDraftPlaylist(trackId);
     } catch (error) {
-      setPlaylistOnlineError((error as Error).message || 'Не удалось добавить трек в плейлист.');
+      if (track.previewUrl) {
+        const previewTrackId = upsertPreviewOnlyTrack({
+          existingTracks: useMockServer.getState().tracks,
+          resultId: track.id,
+          title: track.title,
+          artist: track.artist,
+          artworkUrl: track.artworkUrl,
+          previewUrl: track.previewUrl,
+          ownerId: currentUserId || 'system',
+          addTrack: useMockServer.getState().addTrack,
+          updateTrack: useMockServer.getState().updateTrack,
+        });
+        addTrackToDraftPlaylist(previewTrackId);
+        setPlaylistOnlineError('Полная версия недоступна, добавили preview-трек в плейлист.');
+      } else {
+        setPlaylistOnlineError((error as Error).message || 'Не удалось добавить трек в плейлист.');
+      }
     } finally {
       setPlaylistAddLoadingIds((prev) => {
         const next = { ...prev };
@@ -668,6 +697,34 @@ export function AlbumPage() {
       if (persistedAlbum || ensureAlbum) {
         updateTrack(persistedTrackId, { albumId });
         navigate(`/album/${albumId}`, { replace: true });
+      }
+    } catch (error) {
+      if (track.previewUrl) {
+        const previewTrackId = upsertPreviewOnlyTrack({
+          existingTracks: useMockServer.getState().tracks,
+          resultId: track.id,
+          title: track.title,
+          artist: track.artist,
+          artworkUrl: track.artworkUrl,
+          previewUrl: track.previewUrl,
+          ownerId: currentUserId || 'system',
+          addTrack: useMockServer.getState().addTrack,
+          updateTrack: useMockServer.getState().updateTrack,
+        });
+        if (ensureAlbum) {
+          setItunesError('Полная версия недоступна, добавили preview-трек. Попробуйте скачать позже.');
+          const albumId = `itunes-${itunesCollectionId}`;
+          const existingAlbum = useMockServer.getState().albums[albumId];
+          if (existingAlbum) {
+            updateAlbum(albumId, {
+              trackIds: Array.from(new Set([...(existingAlbum.trackIds || []), previewTrackId])),
+            });
+          }
+        } else {
+          setItunesError('Полная версия недоступна, добавили preview-трек. Попробуйте скачать позже.');
+        }
+      } else {
+        setItunesError((error as Error).message || 'Не удалось скачать трек альбома.');
       }
     } finally {
       setItunesDownloadLoadingId(null);
@@ -927,7 +984,7 @@ export function AlbumPage() {
                     isPlaying={isPlaying}
                     isActive={Boolean(localTrack?.id && localTrack.id === currentTrackId) || isPreviewActive}
                     canDownload
-                    isDownloaded={Boolean(localTrack)}
+                    isDownloaded={Boolean(localTrack && !localTrack.isPreviewOnly)}
                     isDownloading={itunesDownloadLoadingId === track.id}
                     onDownload={() => downloadItunesAlbumTrack(track, { ensureAlbum: false })}
                     onArtistClick={(artistName) => {

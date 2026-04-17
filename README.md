@@ -32,6 +32,7 @@ Required API environment variables:
 - `FRONTEND_ORIGIN=https://<your-pages-domain>`
 - `GENIUS_ACCESS_TOKEN` (optional for richer lyrics lookup)
 - `PEXELS_API_KEY` (optional)
+- `YT_COOKIES_BASE64` (optional, base64 of `cookies.txt` for yt-dlp if YouTube blocks bot/sign-in requests)
 
 Healthcheck endpoint: `GET /api/health`
 

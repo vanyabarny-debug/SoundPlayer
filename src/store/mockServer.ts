@@ -8,6 +8,8 @@ export interface TrackMetadata {
   title: string;
   artistIds: string[];
   duration?: number;
+  previewUrl?: string;
+  isPreviewOnly?: boolean;
   albumId?: string;
   producer?: string;
   lyrics?: string;

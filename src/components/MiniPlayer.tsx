@@ -14,6 +14,7 @@ import { useAuthStore } from '../store/authStore';
 import { ensureArtistBannerFromTrackCover } from '../lib/artistBannerCache';
 import { resolveArtistDescriptionRu } from '../lib/wikiDescriptions';
 import { apiUrl } from '../lib/apiUrl';
+import { upsertPreviewOnlyTrack } from '../lib/previewFallback';
 
 export function MiniPlayer() {
   const navigate = useNavigate();
@@ -190,6 +191,21 @@ export function MiniPlayer() {
         updateUser(user.id, { favoriteTrackIds: nextFavorites });
       }
       playTrack(trackId, [trackId], null);
+    } catch {
+      if (usePlayerStore.getState().previewUrl) {
+        const previewTrackId = upsertPreviewOnlyTrack({
+          existingTracks: useMockServer.getState().tracks,
+          resultId: currentPreviewKey || `mini-${Date.now()}`,
+          title: previewTitle,
+          artist: previewArtist,
+          artworkUrl: previewArtworkUrl || undefined,
+          previewUrl: usePlayerStore.getState().previewUrl || undefined,
+          ownerId: currentUserId || 'system',
+          addTrack: useMockServer.getState().addTrack,
+          updateTrack: useMockServer.getState().updateTrack,
+        });
+        playTrack(previewTrackId, [previewTrackId], null);
+      }
     } finally {
       setIsPreviewDownloading(false);
     }
