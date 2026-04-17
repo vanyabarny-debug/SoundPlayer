@@ -15,6 +15,95 @@ from mutagen.id3 import APIC, TALB, TIT2, TPE1, USLT, ID3, ID3NoHeaderError
 from yt_dlp import YoutubeDL
 
 
+def _is_retryable_yt_error(message: str) -> bool:
+    normalized = message.lower()
+    markers = (
+        "sign in to confirm your age",
+        "sign in to confirm you're not a bot",
+        "sign in to confirm you’re not a bot",
+        "confirm you're not a bot",
+        "confirm you’re not a bot",
+        "age-restricted",
+        "this video is unavailable",
+        "http error 403",
+        "private video",
+    )
+    return any(marker in normalized for marker in markers)
+
+
+def _resolve_candidate_url(entry: dict[str, Any]) -> str:
+    webpage_url = str(entry.get("webpage_url") or "").strip()
+    if webpage_url:
+        return webpage_url
+
+    video_id = str(entry.get("id") or "").strip()
+    if video_id:
+        return f"https://www.youtube.com/watch?v={video_id}"
+
+    raw_url = str(entry.get("url") or "").strip()
+    if raw_url.startswith("http://") or raw_url.startswith("https://"):
+        return raw_url
+    if raw_url:
+        return f"https://www.youtube.com/watch?v={raw_url}"
+    return ""
+
+
+def _download_with_fallback(ydl_opts: dict[str, object], query: str) -> tuple[dict[str, Any], str]:
+    try:
+        with YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(query, download=True)
+            if not isinstance(info, dict):
+                raise RuntimeError("yt-dlp returned invalid metadata")
+            if isinstance(info.get("entries"), list) and info["entries"]:
+                first_entry = info["entries"][0]
+                if isinstance(first_entry, dict):
+                    info = first_entry
+            requested = ydl.prepare_filename(info)
+            return info, requested
+    except Exception as error:
+        if not _is_retryable_yt_error(str(error)):
+            raise
+
+    discovery_opts = dict(ydl_opts)
+    discovery_opts["skip_download"] = True
+    discovery_opts["default_search"] = "ytsearch8"
+    discovery_opts["extract_flat"] = True
+    candidates: list[str] = []
+    try:
+        with YoutubeDL(discovery_opts) as ydl:
+            discovered = ydl.extract_info(query, download=False)
+    except Exception:
+        discovered = None
+
+    if isinstance(discovered, dict):
+        entries = discovered.get("entries")
+        if isinstance(entries, list):
+            for entry in entries:
+                if isinstance(entry, dict):
+                    candidate = _resolve_candidate_url(entry)
+                    if candidate and candidate not in candidates:
+                        candidates.append(candidate)
+        direct_candidate = _resolve_candidate_url(discovered)
+        if direct_candidate and direct_candidate not in candidates:
+            candidates.insert(0, direct_candidate)
+
+    errors: list[str] = []
+    for candidate in candidates:
+        try:
+            with YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(candidate, download=True)
+                if not isinstance(info, dict):
+                    raise RuntimeError("yt-dlp returned invalid metadata")
+                requested = ydl.prepare_filename(info)
+                return info, requested
+        except Exception as error:
+            errors.append(str(error))
+            continue
+
+    details = " | ".join(errors[:3]) if errors else "No playable fallback candidates were found"
+    raise RuntimeError(f"yt-dlp fallback failed: {details}")
+
+
 def _sanitize_filename(value: str) -> str:
     cleaned = re.sub(r'[\\/*?:"<>|]+', "_", value).strip()
     return cleaned or "track"
@@ -219,16 +308,7 @@ def process_media(payload: dict[str, Any] | str) -> dict[str, object]:
         ],
     }
 
-    with YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(normalized_query, download=True)
-        if not isinstance(info, dict):
-            raise RuntimeError("yt-dlp returned invalid metadata")
-        if isinstance(info.get("entries"), list) and info["entries"]:
-            first_entry = info["entries"][0]
-            if isinstance(first_entry, dict):
-                info = first_entry
-
-        requested = ydl.prepare_filename(info)
+    info, requested = _download_with_fallback(ydl_opts, normalized_query)
 
     requested_path = Path(requested)
     mp3_path = requested_path.with_suffix(".mp3")
