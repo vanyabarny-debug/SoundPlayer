@@ -671,7 +671,9 @@ export function BrowsePage() {
     setIsRandomLoading(true);
     try {
       const seed = randomSeedQueries[Math.floor(Math.random() * randomSeedQueries.length)];
-      const response = await fetch(`https://itunes.apple.com/search?entity=song&limit=45&term=${encodeURIComponent(seed)}`);
+      const response = await fetch(
+        apiUrl(`/api/search/itunes?entity=song&limit=45&query=${encodeURIComponent(seed)}`)
+      );
       if (!response.ok) throw new Error('itunes random failed');
       const payload = await response.json() as {
         results?: Array<{
@@ -899,14 +901,14 @@ export function BrowsePage() {
 
           const itunesSearchPromise = (async () => {
             const payload = await parsePayload(
-              `https://itunes.apple.com/search?entity=song&limit=25&term=${encodeURIComponent(normalizedExternalQuery)}`
+              apiUrl(`/api/search/itunes?entity=song&limit=25&query=${encodeURIComponent(normalizedExternalQuery)}`)
             );
             const baseResults = payload.results || [];
             let mergedResults = baseResults;
             if (baseResults.length === 0 && fallbackTerms.length > 0) {
               const fallbackPayloads = await Promise.allSettled(
                 fallbackTerms.map((term) =>
-                  parsePayload(`https://itunes.apple.com/search?entity=song&limit=35&term=${encodeURIComponent(term)}`)
+                  parsePayload(apiUrl(`/api/search/itunes?entity=song&limit=35&query=${encodeURIComponent(term)}`))
                 )
               );
               for (const candidate of fallbackPayloads) {
@@ -1153,7 +1155,7 @@ export function BrowsePage() {
         const term = `${artistName} ${album.title}`.trim();
         try {
           const response = await fetch(
-            `https://itunes.apple.com/search?entity=album&limit=10&term=${encodeURIComponent(term)}`,
+            apiUrl(`/api/search/itunes?entity=album&limit=10&query=${encodeURIComponent(term)}`),
             { signal: controller.signal }
           );
           if (!response.ok) continue;

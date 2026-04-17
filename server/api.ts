@@ -512,6 +512,57 @@ app.get('/api/pexels/videos/search', async (req, res) => {
   }
 });
 
+app.get('/api/search/itunes', async (req, res) => {
+  const rawQuery = typeof req.query?.query === 'string' ? req.query.query.trim() : '';
+  const rawEntity = typeof req.query?.entity === 'string' ? req.query.entity.trim() : '';
+  const rawLimit = Number(req.query?.limit);
+  const entity = rawEntity || 'song';
+  const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), 50) : 25;
+
+  if (!rawQuery) {
+    res.status(400).json({ error: 'query is required' });
+    return;
+  }
+
+  const params = new URLSearchParams({
+    term: rawQuery,
+    entity,
+    limit: String(limit),
+    media: 'music',
+    country: 'US',
+  });
+
+  const upstreamUrl = `https://itunes.apple.com/search?${params.toString()}`;
+
+  try {
+    const upstream = await fetch(upstreamUrl, {
+      headers: {
+        'User-Agent': CHROME_LIKE_UA,
+        Accept: 'application/json',
+      },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!upstream.ok) {
+      res.status(502).json({
+        error: 'itunes search failed',
+        status: upstream.status,
+      });
+      return;
+    }
+    const payload = (await upstream.json()) as {
+      resultCount?: number;
+      results?: unknown[];
+    };
+    res.json({
+      resultCount: Number(payload.resultCount || 0),
+      results: Array.isArray(payload.results) ? payload.results : [],
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(502).json({ error: 'itunes search failed', details: message.slice(0, 240) });
+  }
+});
+
 app.get('/api/search/youtube', async (req, res) => {
   const rawQuery = typeof req.query?.query === 'string' ? req.query.query.trim() : '';
   const rawLimit = Number(req.query?.limit);

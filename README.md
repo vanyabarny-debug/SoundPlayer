@@ -44,6 +44,7 @@ Build settings:
 
 Frontend environment variables:
 
-- `VITE_API_BASE_URL=https://<your-api-domain>`
+- `VITE_API_BASE_URL=https://soundplayer-api.onrender.com`
 
-If `VITE_API_BASE_URL` is empty, app uses relative `/api/*` (good for local dev with Vite proxy).
+In production build, app falls back to `https://soundplayer-api.onrender.com` even if `VITE_API_BASE_URL` is missing.
+In local dev, keep `VITE_API_BASE_URL` empty to use relative `/api/*` via Vite proxy.
