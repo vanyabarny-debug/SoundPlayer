@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { BottomNav } from './BottomNav';
 import { MiniPlayer } from './MiniPlayer';
 import { AudioPlayer } from './AudioPlayer';
+import { YTPlayer } from './YTPlayer';
 import { usePlayerStore } from '../store/playerStore';
 import { useMockServer } from '../store/mockServer';
 import { getImageFile } from '../lib/db';
@@ -65,6 +66,7 @@ export function Layout({ children }: { children: ReactNode }) {
         <BottomNav />
       </div>
       <AudioPlayer />
+      <YTPlayer />
     </div>
   );
 }

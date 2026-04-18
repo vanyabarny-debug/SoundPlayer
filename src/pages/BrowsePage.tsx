@@ -1204,18 +1204,7 @@ export function BrowsePage() {
     setDownloadLoadingId(result.id);
     setDownloadError(null);
     try {
-      const response = await fetch(apiUrl('/api/download'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: downloadQuery,
-          url: downloadQuery,
-          title: result.title,
-          artist: result.artist,
-          album: result.album || '',
-          artworkUrl: result.artworkUrl || '',
-        }),
-      });
+      const response = new Response(null, { status: 410, statusText: 'Server media download removed' });
 
       if (!response.ok) {
         throw new Error('Не удалось скачать трек. Попробуйте ещё раз.');

@@ -37,6 +37,10 @@ interface PlayerState {
   audioOutputDeviceId: string;
   audioOutputDevices: AudioOutputDevice[];
   isAudioOutputSwitchSupported: boolean;
+  ytVideoId: string | null;
+  ytSourceKey: string | null;
+  isYTPlaying: boolean;
+  hasYTUserGesture: boolean;
   
   playTrack: (trackId: string, queue?: string[], albumId?: string | null) => void;
   playPreview: (preview: PreviewTrack, queue?: PreviewTrack[]) => void;
@@ -57,6 +61,12 @@ interface PlayerState {
   setAudioOutputDeviceId: (deviceId: string) => void;
   setAudioOutputDevices: (devices: AudioOutputDevice[]) => void;
   setAudioOutputSwitchSupported: (supported: boolean) => void;
+  setYTTrack: (videoId: string, sourceKey: string) => void;
+  playYT: () => void;
+  pauseYT: () => void;
+  stopYT: () => void;
+  unlockYTUserGesture: () => void;
+  setYTPlaying: (playing: boolean) => void;
 }
 
 export const usePlayerStore = create<PlayerState>((set, get) => ({
@@ -83,6 +93,10 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   audioOutputDeviceId: 'default',
   audioOutputDevices: [],
   isAudioOutputSwitchSupported: false,
+  ytVideoId: null,
+  ytSourceKey: null,
+  isYTPlaying: false,
+  hasYTUserGesture: false,
 
   playTrack: (trackId, queue, albumId = null) => set((state) => {
     if (trackId === state.currentTrackId && albumId === state.currentAlbumId) {
@@ -211,4 +225,39 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   setAudioOutputDeviceId: (deviceId) => set({ audioOutputDeviceId: deviceId }),
   setAudioOutputDevices: (devices) => set({ audioOutputDevices: devices }),
   setAudioOutputSwitchSupported: (supported) => set({ isAudioOutputSwitchSupported: supported }),
+  setYTTrack: (videoId, sourceKey) => set((state) => {
+    if (state.ytVideoId === videoId && state.ytSourceKey === sourceKey) {
+      return { isYTPlaying: true };
+    }
+    return {
+      ytVideoId: videoId,
+      ytSourceKey: sourceKey,
+      isYTPlaying: true,
+      currentTrackId: null,
+      currentAlbumId: null,
+      currentPreviewKey: null,
+      previewUrl: null,
+      previewTitle: null,
+      previewArtist: null,
+      previewArtworkUrl: null,
+      previewQueue: [],
+      currentPreviewIndex: -1,
+      isPlaying: true,
+      isLoading: false,
+      currentTime: 0,
+      duration: 0,
+    };
+  }),
+  playYT: () => set({ isYTPlaying: true, isPlaying: true }),
+  pauseYT: () => set({ isYTPlaying: false, isPlaying: false }),
+  stopYT: () => set({
+    ytVideoId: null,
+    ytSourceKey: null,
+    isYTPlaying: false,
+    isPlaying: false,
+    currentTime: 0,
+    duration: 0,
+  }),
+  unlockYTUserGesture: () => set({ hasYTUserGesture: true }),
+  setYTPlaying: (playing) => set({ isYTPlaying: playing, isPlaying: playing }),
 }));

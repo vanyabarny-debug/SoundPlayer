@@ -100,112 +100,20 @@ export function MiniPlayer() {
     if (!isPreviewContext || !previewTitle || !previewArtist || isPreviewDownloading) return;
     setIsPreviewDownloading(true);
     try {
-      const normalizedArtist = previewArtist.trim();
-      const normalizedTitle = previewTitle
-        .replace(new RegExp(`^${normalizedArtist.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*[-–—:]\\s*`, 'i'), '')
-        .replace(/\s+/g, ' ')
-        .trim() || previewTitle.trim();
-      const query = `${previewArtist} - ${previewTitle}`;
-      const response = await fetch(apiUrl('/api/download'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query,
-          url: query,
-          title: previewTitle,
-          artist: previewArtist,
-          artworkUrl: previewArtworkUrl || '',
-        }),
-      });
-      if (!response.ok) throw new Error('Failed to download preview');
-      const blob = await response.blob();
-      const trackId = `mini-preview-${Date.now()}`;
-      await saveAudioFile(trackId, blob);
-
-      let coverId: string | undefined;
-      if (previewArtworkUrl) {
-        try {
-          const coverResponse = await fetch(previewArtworkUrl);
-          if (coverResponse.ok) {
-            coverId = `cover-${trackId}`;
-            await saveImageFile(coverId, await coverResponse.blob());
-          }
-        } catch {
-          // Keep download flow working without artwork.
-        }
-      }
-
-      const existingArtist = Object.values(artists).find(
-        (artist) => artist.name.trim().toLowerCase() === normalizedArtist.toLowerCase()
-      );
-      let artistRef = normalizedArtist;
-      if (existingArtist) {
-        artistRef = existingArtist.id;
-        await ensureArtistBannerFromTrackCover({
-          artist: existingArtist,
-          coverBlob: coverId ? await getImageFile(coverId) : null,
-          coverUrl: previewArtworkUrl || undefined,
-          updateArtist: useMockServer.getState().updateArtist,
-        });
-      } else {
-        const wikiProfile = await resolveArtistDescriptionRu(normalizedArtist, {
-          fallbackDescription: `${normalizedArtist} - imported from mini player preview.`,
-        });
-        artistRef = `artist-${Date.now()}-${normalizedArtist.toLowerCase().replace(/\s+/g, '-')}`;
-        addArtist({
-          id: artistRef,
-          name: normalizedArtist,
-          description: wikiProfile.description,
-          ownerId: currentUserId || undefined,
-        });
-        await ensureArtistBannerFromTrackCover({
-          artist: {
-            id: artistRef,
-            name: normalizedArtist,
-            description: wikiProfile.description,
-            ownerId: currentUserId || undefined,
-          },
-          coverBlob: coverId ? await getImageFile(coverId) : null,
-          coverUrl: previewArtworkUrl || undefined,
-          updateArtist: useMockServer.getState().updateArtist,
-        });
-      }
-
-      addTrack({
-        id: trackId,
-        title: normalizedTitle,
-        artistIds: [normalizedArtist],
-        duration: await getAudioDurationFromBlob(blob),
-        isExplicit: false,
-        isSingle: true,
-        format: 'mp3',
-        coverUrl: coverId,
+      const previewUrl = usePlayerStore.getState().previewUrl || undefined;
+      if (!previewUrl) return;
+      const previewTrackId = upsertPreviewOnlyTrack({
+        existingTracks: useMockServer.getState().tracks,
+        resultId: currentPreviewKey || `mini-${Date.now()}`,
+        title: previewTitle,
+        artist: previewArtist,
+        artworkUrl: previewArtworkUrl || undefined,
+        previewUrl,
         ownerId: currentUserId || 'system',
+        addTrack: useMockServer.getState().addTrack,
+        updateTrack: useMockServer.getState().updateTrack,
       });
-
-      const user = currentUserId ? users[currentUserId] : null;
-      if (user) {
-               const nextFavorites = user.favoriteTrackIds.includes(trackId)
-          ? user.favoriteTrackIds
-          : [trackId, ...user.favoriteTrackIds];
-        updateUser(user.id, { favoriteTrackIds: nextFavorites });
-      }
-      playTrack(trackId, [trackId], null);
-    } catch {
-      if (usePlayerStore.getState().previewUrl) {
-        const previewTrackId = upsertPreviewOnlyTrack({
-          existingTracks: useMockServer.getState().tracks,
-          resultId: currentPreviewKey || `mini-${Date.now()}`,
-          title: previewTitle,
-          artist: previewArtist,
-          artworkUrl: previewArtworkUrl || undefined,
-          previewUrl: usePlayerStore.getState().previewUrl || undefined,
-          ownerId: currentUserId || 'system',
-          addTrack: useMockServer.getState().addTrack,
-          updateTrack: useMockServer.getState().updateTrack,
-        });
-        playTrack(previewTrackId, [previewTrackId], null);
-      }
+      playTrack(previewTrackId, [previewTrackId], null);
     } finally {
       setIsPreviewDownloading(false);
     }

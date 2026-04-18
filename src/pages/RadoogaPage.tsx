@@ -6,7 +6,7 @@ import { useRadoogaStore } from '../store/radoogaStore';
 import { usePlayerStore } from '../store/playerStore';
 import { useMockServer } from '../store/mockServer';
 import { useAuthStore } from '../store/authStore';
-import { saveAudioFile, saveImageFile } from '../lib/db';
+import { saveImageFile } from '../lib/db';
 import { CachedImage } from '../components/CachedImage';
 import { RadoogaAudioVisualizer } from '../components/RadoogaAudioVisualizer';
 import { AddToPlaylistModal } from '../components/AddToPlaylistModal';
@@ -38,43 +38,7 @@ import type { RadoogaCandidate, SeedTrack } from '../lib/radoogaRecommendations'
 import { pushNavigationEntry } from '../lib/navigationHistory';
 import { resolveArtistDescriptionRu } from '../lib/wikiDescriptions';
 import { ensureArtistBannerFromTrackCover } from '../lib/artistBannerCache';
-import { apiUrl } from '../lib/apiUrl';
 import { upsertPreviewOnlyTrack } from '../lib/previewFallback';
-
-const sanitizeFilename = (value: string): string =>
-  value
-    .replace(/[/\\?%*:|"<>]/g, '_')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-const extractFilenameFromDisposition = (contentDisposition: string | null): string | null => {
-  if (!contentDisposition) return null;
-  const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
-  if (utf8Match?.[1]) {
-    try {
-      return decodeURIComponent(utf8Match[1]);
-    } catch {
-      return utf8Match[1];
-    }
-  }
-  const basicMatch = contentDisposition.match(/filename="?([^"]+)"?/i);
-  return basicMatch?.[1] ?? null;
-};
-
-const getAudioDurationFromBlob = async (audioBlob: Blob): Promise<number> => {
-  const objectUrl = URL.createObjectURL(audioBlob);
-  try {
-    return await new Promise<number>((resolve) => {
-      const audio = document.createElement('audio');
-      audio.preload = 'metadata';
-      audio.onloadedmetadata = () => resolve(Number.isFinite(audio.duration) ? audio.duration : 0);
-      audio.onerror = () => resolve(0);
-      audio.src = objectUrl;
-    });
-  } finally {
-    URL.revokeObjectURL(objectUrl);
-  }
-};
 
 type EnrichPayload = {
   lyrics: string | null;
@@ -197,7 +161,18 @@ export function RadoogaPage() {
     refreshFeed,
   } = useRadoogaStore();
 
-  const { playPreview, currentTime, duration, currentPreviewKey, isPlaying, isMuted, toggleMute } = usePlayerStore();
+  const {
+    playPreview,
+    currentTime,
+    duration,
+    currentPreviewKey,
+    isPlaying,
+    isMuted,
+    toggleMute,
+    setYTTrack,
+    playYT,
+    stopYT,
+  } = usePlayerStore();
   const { currentUserId } = useAuthStore();
   const { users, tracks, artists, addTrack, addArtist, updateUser } = useMockServer();
   const currentUser = currentUserId ? users[currentUserId] : null;
@@ -573,7 +548,18 @@ export function RadoogaPage() {
   }, [activeItem?.id]);
 
   useEffect(() => {
-    if (!activeItem?.previewUrl) return;
+    if (!activeItem) return;
+    if (videoItem?.videoId) {
+      setYTTrack(videoItem.videoId, `radooga-${activeItem.id}`);
+      playYT();
+      markSeen(activeItem.id);
+      return;
+    }
+    stopYT();
+    if (!activeItem.previewUrl) {
+      markSeen(activeItem.id);
+      return;
+    }
     const queue = [{
       key: `radooga-${activeItem.id}`,
       url: activeItem.previewUrl,
@@ -592,7 +578,15 @@ export function RadoogaPage() {
       queue
     );
     markSeen(activeItem.id);
-  }, [activeItem?.id, activeItem?.previewUrl, markSeen, playPreview]);
+  }, [
+    activeItem,
+    videoItem?.videoId,
+    markSeen,
+    playPreview,
+    playYT,
+    setYTTrack,
+    stopYT,
+  ]);
 
   useEffect(() => {
     if (!activeItem) return;
@@ -770,36 +764,6 @@ export function RadoogaPage() {
     if (downloadInFlightIds[candidate.id]) return null;
     setDownloadInFlightIds((prev) => ({ ...prev, [candidate.id]: true }));
     try {
-    const downloadQuery = `${candidate.artist} - ${candidate.title}`;
-      const response = await fetch(apiUrl('/api/download'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: downloadQuery,
-          url: downloadQuery,
-          title: candidate.title,
-          artist: candidate.artist,
-          artworkUrl: candidate.artworkUrl || '',
-        }),
-      });
-      if (!response.ok) throw new Error('Не удалось скачать трек из ленты.');
-
-      const blob = await response.blob();
-      const contentDisposition = response.headers.get('content-disposition');
-      const headerFilename = extractFilenameFromDisposition(contentDisposition);
-      const headerLyricsEncoded = response.headers.get('x-track-lyrics');
-      const headerLyrics = headerLyricsEncoded ? decodeURIComponent(headerLyricsEncoded) : '';
-      const fallbackFilename = `${sanitizeFilename(downloadQuery) || 'track'}-processed.mp3`;
-      const downloadFilename = sanitizeFilename(headerFilename || fallbackFilename) || 'download.mp3';
-      const objectUrl = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = objectUrl;
-      link.download = downloadFilename;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
-
       const artistParts = splitArtistField(candidate.artist);
       const allArtistNames = listRadoogaPerformers(candidate.artist, candidate.title);
       const featureOnlyNames = Array.from(
@@ -845,7 +809,6 @@ export function RadoogaPage() {
       }
 
       const targetTrackId = `radooga-${Date.now()}-${candidate.id}`;
-      await saveAudioFile(targetTrackId, blob);
       let coverId: string | undefined;
       if (candidate.artworkUrl) {
         try {
@@ -869,23 +832,22 @@ export function RadoogaPage() {
           id: finalTrackId,
           title: candidate.title,
           artistIds: allArtistNames.length > 0 ? allArtistNames : [candidate.artist],
-          duration: await getAudioDurationFromBlob(blob),
+          duration: 30,
           isExplicit: false,
           isSingle: true,
           format: 'mp3',
           coverUrl: coverId,
           ownerId: currentUserId || 'system',
-          lyrics: headerLyrics || undefined,
+          lyrics: undefined,
           features: featureOnlyNames,
           previewUrl: candidate.previewUrl,
-          isPreviewOnly: false,
+          isPreviewOnly: true,
         });
-      } else if (coverId || headerLyrics) {
+      } else if (coverId) {
         liveState.updateTrack(existingTrack.id, {
           coverUrl: coverId || existingTrack.coverUrl,
-          lyrics: headerLyrics || existingTrack.lyrics,
           previewUrl: candidate.previewUrl || existingTrack.previewUrl,
-          isPreviewOnly: false,
+          isPreviewOnly: true,
         });
       }
       const authState = useAuthStore.getState();
@@ -1348,16 +1310,13 @@ export function RadoogaPage() {
               {!isEnrichLoading && activeEnrichLayer === 'video' && videoItem && (
                 <div className="absolute inset-0 z-20 pointer-events-none pt-24 pb-56">
                   <div className="w-full h-full pointer-events-auto flex items-center justify-center bg-black">
-                    <div className="h-full max-h-full aspect-[3/4] overflow-hidden bg-black">
-                      <iframe
-                        src={videoItem.embedUrl}
-                        title={videoItem.title}
-                        className="w-full h-full"
-                        loading="lazy"
-                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                        referrerPolicy="strict-origin-when-cross-origin"
-                        allowFullScreen
+                    <div className="h-full max-h-full aspect-[3/4] overflow-hidden bg-black relative">
+                      <CachedImage
+                        src={videoItem.thumbnailUrl}
+                        alt={videoItem.title}
+                        className="w-full h-full object-cover opacity-80"
                       />
+                      <div className="absolute inset-0 bg-black/35" />
                     </div>
                   </div>
                 </div>
